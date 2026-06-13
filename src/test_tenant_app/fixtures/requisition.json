@@ -1,0 +1,23 @@
+{
+  "requisition_id": "req-stub-001",
+  "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd",
+  "status": "IN_NEGOTIATION",
+  "items": [
+    {"item_id": "item-001", "sku": "OFF-PAPER-A4", "name": "A4 Paper Ream", "quantity": 10, "unit_price": 8.50, "total": 85.00},
+    {"item_id": "item-002", "sku": "OFF-PEN-BOX", "name": "Ballpoint Pens (box)", "quantity": 5, "unit_price": 12.00, "total": 60.00}
+  ],
+  "delivery_address": "123 Demo Street, San Francisco, CA 94105",
+  "delivery_threshold_days": 14,
+  "delivery_ideal_days": 7,
+  "budget_limit": null,
+  "deadline": "2026-06-26T00:00:00Z",
+  "created_at": "2026-06-12T10:00:00Z",
+  "updated_at": "2026-06-12T10:05:00Z",
+  "graph_nodes": {
+    "ingest": "completed",
+    "kraljic_classify": "completed",
+    "spot_bidding": "in_progress",
+    "bid_evaluation": "pending",
+    "award": "pending"
+  }
+}

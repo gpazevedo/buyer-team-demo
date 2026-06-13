@@ -1,0 +1,202 @@
+"""MasterDataClient — reads/writes via dynamodb-master-data and tenant-mdm-emulator
+MCP servers (PRD-015 §4).
+
+SKILL_MODE=stub  returns fixture data.
+SKILL_MODE=live  calls AgentCore Gateway (not yet wired).
+"""
+from __future__ import annotations
+
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+SKILL_MODE = os.getenv("SKILL_MODE", "stub")
+ENV = os.getenv("ENV", "dev")
+DEFAULT_TENANT_ID = os.getenv("DEV_TENANT_ID", "6eb4ebaf-804e-5837-ae26-f665a76b58dd")
+
+# In-memory stores for stub mode
+_stub_requisitions: dict[str, dict] = {}  # keyed by tenant_id:requisition_id
+_stub_orders: list[dict] = []  # POs emitted on approval
+
+
+def _set_pr_age(tenant_id: str, requisition_id: str, seconds: float) -> None:
+    """Test/demo seam: backdate a stub PR so state progression can be driven deterministically."""
+    pr = _stub_requisitions.get(f"{tenant_id}:{requisition_id}")
+    if pr:
+        pr["_created_ts"] = time.time() - seconds
+
+
+def _advance_stub_state(pr: dict) -> dict:
+    """Simulate time-based state progression for demo polling."""
+    if pr["status"] in ("CANCELLED", "COMPLETED", "FAILED", "PENDING_HUMAN_APPROVAL"):
+        return pr
+    elapsed = time.time() - pr.get("_created_ts", time.time())
+    if elapsed < 5:
+        pr["status"] = "NEW"
+        pr["graph_nodes"] = {}
+    elif elapsed < 10:
+        pr["status"] = "ACTIVE"
+        pr["graph_nodes"] = {"ingest": "completed"}
+    elif elapsed < 20:
+        pr["status"] = "IN_NEGOTIATION"
+        pr["graph_nodes"] = {"ingest": "completed", "spot_bidding": "in_progress", "bid_evaluation": "pending"}
+    else:
+        pr["status"] = "PENDING_HUMAN_APPROVAL"
+        pr["graph_nodes"] = {"ingest": "completed", "spot_bidding": "completed", "bid_evaluation": "completed", "award": "pending"}
+    pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+    return pr
+
+
+def _build_order(tenant_id: str, pr: dict) -> dict:
+    """Build a PurchaseOrder from an approved PR and its (stub) award."""
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    requisition_id = pr["requisition_id"]
+    awards = dynamo_client.get_awards(tenant_id, requisition_id)
+    award = awards[0] if awards else {}
+    line_items = pr["items"]
+    return {
+        "order_id": f"po-{requisition_id[:8]}",
+        "requisition_id": requisition_id,
+        "tenant_id": tenant_id,
+        "supplier_id": award.get("supplier_id", "supplier-001"),
+        "supplier_name": award.get("supplier_name"),
+        "supplier_contact_email": None,
+        "status": "RECEIVED",
+        "line_items": line_items,
+        "total_value": sum(li["total"] for li in line_items),
+        "savings_amount": award.get("savings_amount", 0.0),
+        "savings_pct": award.get("savings_pct", 0.0),
+        "received_at": datetime.now(tz=timezone.utc).isoformat(),
+        "award_id": award.get("award_id"),
+    }
+
+
+class MasterDataClient:
+    def create_pr(
+        self,
+        tenant_id: str,
+        items: list[dict],
+        delivery_address: str,
+        delivery_threshold_days: int,
+        delivery_ideal_days: int | None = None,
+        budget_limit: float | None = None,
+    ) -> dict:
+        requisition_id = str(uuid4())
+        now = datetime.now(tz=timezone.utc)
+        deadline = now + timedelta(days=delivery_threshold_days)
+        computed_budget = budget_limit or sum(
+            i.get("estimated_price", 0) * i.get("quantity", 1) for i in items
+        )
+        pr = {
+            "requisition_id": requisition_id,
+            "tenant_id": tenant_id,
+            "status": "NEW",
+            "items": [
+                {
+                    "item_id": it["item_id"],
+                    "sku": it.get("sku"),
+                    "name": it.get("name", ""),
+                    "quantity": it.get("quantity", 1),
+                    "unit_price": it.get("estimated_price", 0),
+                    "total": it.get("estimated_price", 0) * it.get("quantity", 1),
+                }
+                for it in items
+            ],
+            "delivery_address": delivery_address,
+            "delivery_threshold_days": delivery_threshold_days,
+            "delivery_ideal_days": delivery_ideal_days,
+            "budget_limit": computed_budget,
+            "deadline": deadline.isoformat(),
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "graph_nodes": {},
+        }
+        if SKILL_MODE == "stub":
+            pr["_created_ts"] = time.time()
+            _stub_requisitions[f"{tenant_id}:{requisition_id}"] = pr
+            return pr
+        # live: persist to {env}-requisitions (pk/sk per skills/integration/ingest_pr).
+        from test_tenant_app.clients.ddb import table, to_decimal
+        item = {"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata", **pr}
+        table("requisitions").put_item(Item=to_decimal(item))
+        return pr
+
+    def get_pr(self, tenant_id: str, requisition_id: str) -> dict | None:
+        if SKILL_MODE == "stub":
+            pr = _stub_requisitions.get(f"{tenant_id}:{requisition_id}")
+            if pr:
+                return _advance_stub_state(pr)
+            # If no in-memory PR, return stub fixture for demo
+            import json
+            from pathlib import Path
+            data = json.loads((Path(__file__).parent.parent / "fixtures" / "requisition.json").read_text())
+            if data["requisition_id"] == requisition_id:
+                return data
+            return None
+        from test_tenant_app.clients.ddb import table, to_native
+        item = table("requisitions").get_item(
+            Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"}
+        ).get("Item")
+        return to_native(item) if item else None
+
+    def approve_pr(self, tenant_id: str, requisition_id: str) -> dict:
+        if SKILL_MODE == "stub":
+            key = f"{tenant_id}:{requisition_id}"
+            pr = _stub_requisitions.get(key)
+            if pr:
+                pr["status"] = "COMPLETED"
+                pr["graph_nodes"]["award"] = "completed"
+                pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+                _stub_orders.append(_build_order(tenant_id, pr))
+            return {"status": "COMPLETED", "requisition_id": requisition_id}
+        self._set_status(tenant_id, requisition_id, "COMPLETED")
+        return {"status": "COMPLETED", "requisition_id": requisition_id}
+
+    def cancel_pr(self, tenant_id: str, requisition_id: str) -> dict:
+        if SKILL_MODE == "stub":
+            key = f"{tenant_id}:{requisition_id}"
+            pr = _stub_requisitions.get(key)
+            if pr:
+                pr["status"] = "CANCELLED"
+                pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+            return {"status": "CANCELLED", "requisition_id": requisition_id}
+        self._set_status(tenant_id, requisition_id, "CANCELLED")
+        return {"status": "CANCELLED", "requisition_id": requisition_id}
+
+    def _set_status(self, tenant_id: str, requisition_id: str, status: str) -> None:
+        from test_tenant_app.clients.ddb import table
+        table("requisitions").update_item(
+            Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"},
+            UpdateExpression="SET #s = :s, updated_at = :u",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": status,
+                ":u": datetime.now(tz=timezone.utc).isoformat(),
+            },
+        )
+
+    def get_thresholds(self, env: str) -> dict:
+        """Read Kraljic thresholds from {env}-system-config.
+
+        Table key: config_group (hash) / config_key (range).
+        Value stored in config_json blob.
+        """
+        if SKILL_MODE == "stub":
+            return {"profit_impact": 0.5, "supply_risk": 0.5}
+        # live: read from DynamoDB {env}-system-config
+        import boto3
+        import json as _json
+        ddb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        table = ddb.Table(f"{env}-system-config")
+        resp = table.get_item(
+            Key={"config_group": "kraljic", "config_key": "thresholds"}
+        )
+        item = resp.get("Item")
+        if item:
+            return _json.loads(item["config_json"])
+        return {"profit_impact": 0.5, "supply_risk": 0.5}
+
+
+master_data_client = MasterDataClient()

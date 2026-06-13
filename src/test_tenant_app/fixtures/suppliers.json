@@ -1,0 +1,6 @@
+[
+  {"supplier_id": "sup-001", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Staples Business", "country": "US", "contact_email": "procurement@staples.example.com", "category_ids": ["cat-001"], "on_time_delivery_rate": 0.97, "quality_score": 0.92},
+  {"supplier_id": "sup-002", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Dell Technologies", "country": "US", "contact_email": "b2b@dell.example.com", "category_ids": ["cat-002"], "on_time_delivery_rate": 0.94, "quality_score": 0.96},
+  {"supplier_id": "sup-003", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Shin-Etsu Chemical", "country": "JP", "contact_email": "sales@shinetsu.example.com", "category_ids": ["cat-003"], "on_time_delivery_rate": 0.88, "quality_score": 0.99},
+  {"supplier_id": "sup-004", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "TSMC Advanced", "country": "TW", "contact_email": "supply@tsmc.example.com", "category_ids": ["cat-004"], "on_time_delivery_rate": 0.91, "quality_score": 0.99}
+]

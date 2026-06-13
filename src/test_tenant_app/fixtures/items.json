@@ -1,0 +1,7 @@
+[
+  {"item_id": "item-001", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "A4 Paper Ream", "sku": "OFF-PAPER-A4", "category_id": "cat-001", "category_name": "Office Supplies", "estimated_price": 8.50, "unit": "ream", "preferred_supplier_id": "sup-001"},
+  {"item_id": "item-002", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Ballpoint Pens (box)", "sku": "OFF-PEN-BOX", "category_id": "cat-001", "category_name": "Office Supplies", "estimated_price": 12.00, "unit": "box", "preferred_supplier_id": "sup-001"},
+  {"item_id": "item-003", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Dell Latitude 7450", "sku": "IT-LAPTOP-7450", "category_id": "cat-002", "category_name": "IT Hardware", "estimated_price": 1350.00, "unit": "unit", "preferred_supplier_id": "sup-002"},
+  {"item_id": "item-004", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Neodymium Magnet Block", "sku": "RARE-NDFEB-50", "category_id": "cat-003", "category_name": "Rare Earth Components", "estimated_price": 48.00, "unit": "unit", "preferred_supplier_id": "sup-003"},
+  {"item_id": "item-005", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "28nm Logic IC", "sku": "IC-28NM-LOGIC", "category_id": "cat-004", "category_name": "Semiconductor ICs", "estimated_price": 320.00, "unit": "unit", "preferred_supplier_id": "sup-004"}
+]
