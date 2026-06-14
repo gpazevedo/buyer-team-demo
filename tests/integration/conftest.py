@@ -42,6 +42,9 @@ TABLE_KEY_SCHEMA = {
 }
 
 _CFG = Config(connect_timeout=10, read_timeout=30, retries={"mode": "adaptive", "max_attempts": 4})
+# Data-plane agent invocations run an LLM tool loop (+ structured_output) that can
+# take a few minutes; the 30s read timeout above is only right for control-plane/DDB.
+_INVOKE_CFG = Config(connect_timeout=10, read_timeout=300, retries={"mode": "adaptive", "max_attempts": 2})
 
 
 @cache
@@ -77,7 +80,7 @@ def agentcore_control():
 
 @pytest.fixture
 def agentcore():
-    return _session().client("bedrock-agentcore", config=_CFG)
+    return _session().client("bedrock-agentcore", config=_INVOKE_CFG)
 
 
 @pytest.fixture

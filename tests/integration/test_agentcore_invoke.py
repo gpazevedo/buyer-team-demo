@@ -80,15 +80,37 @@ def test_kraljic_classifier_invoke_classifies(agentcore, agentcore_control):
     assert "contributing_factors" in body
 
 
-@pytest.mark.xfail(reason="spot_bidding still holds the placeholder image (HTTP 424)", strict=False)
-def test_spot_bidding_invoke_placeholder(agentcore, agentcore_control):
-    """Documents the remaining gap: agents other than kraljic are still placeholders."""
+def test_spot_bidding_invoke_runs_bidding_round(agentcore, agentcore_control):
+    """Real LLM-backed A2A invoke: a spot-bidding round composes the RFQ, sends an
+    invitation per candidate supplier, and returns the full SpotBidResponse schema
+    (genuine tool use, not a templated stub)."""
     arn = _runtime_arn(agentcore_control, "dev_spot_bidding")
+    request = {
+        "negotiation_id": "itest-spot-neg-1",
+        "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd",
+        "deadline": "2026-06-20T00:00:00Z",
+        "budget_limit": 10000,
+        "target_price": 8000,
+        "max_concurrent_bids": 3,
+        "items": [{"item_id": "i1", "description": "office paper A4", "quantity": 100}],
+        "candidate_suppliers": [
+            {"supplier_id": "s1", "name": "Acme"},
+            {"supplier_id": "s2", "name": "Globex"},
+        ],
+        "governance": {},
+    }
     resp = agentcore.invoke_agent_runtime(
         agentRuntimeArn=arn,
         runtimeSessionId=f"itest-spot-{uuid.uuid4().hex}".ljust(33, "0"),
         contentType="application/json",
         accept="application/json",
-        payload=_a2a_message("{}"),
+        payload=_a2a_message(json.dumps(request)),
     )
     assert resp["ResponseMetadata"]["HTTPStatusCode"] == 200
+    # The SpotBidResponse JSON is nested as an artifact text part.
+    body = resp["response"].read().decode()
+    assert "spot_bid_result" in body
+    assert "itest-spot-neg-1" in body
+    assert "invitations_sent" in body
+    assert "response_rate" in body
+    assert "communication_log" in body
