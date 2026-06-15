@@ -3,8 +3,9 @@
 Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1, because
 these actually invoke runtimes (billable, and may cold-start).
 
-- kraljic_classifier carries a real A2A image and is asserted for real.
-- The other agents still hold ARM64 placeholder images that reject the invoke
+- kraljic_classifier, spot_bidding, and bid_evaluation carry real A2A images and
+  are asserted for real.
+- The remaining agents still hold ARM64 placeholder images that reject the invoke
   contract (HTTP 424), so they stay xfail until real images are deployed.
 """
 import json
@@ -114,3 +115,41 @@ def test_spot_bidding_invoke_runs_bidding_round(agentcore, agentcore_control):
     assert "invitations_sent" in body
     assert "response_rate" in body
     assert "communication_log" in body
+
+
+def test_bid_evaluation_invoke_ranks_bids(agentcore, agentcore_control):
+    """Real LLM-backed A2A invoke: the bid evaluation agent scores each bid across the
+    weighted dimensions, ranks them, and recommends one of the input bids — full
+    BidEvaluationResponse schema (genuine tool use + completeness steering, not a stub)."""
+    arn = _runtime_arn(agentcore_control, "dev_bid_evaluation")
+    request = {
+        "negotiation_id": "itest-bideval-neg-1",
+        "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd",
+        "category_id": "784700a6-a316-5f45-a773-578052c89bcc",
+        "budget_limit": 10000,
+        "esg_threshold": 0.3,
+        "evaluation_weights": {"cost": 0.4, "delivery": 0.2, "quality": 0.2, "esg": 0.1, "history": 0.1},
+        "items": [{"item_id": "itest-item-1", "delivery_ideal_days": 7, "quantity": 100}],
+        "bids": [
+            {"bid_id": "b1", "supplier_id": "04caf9a7-4359-50c2-b458-9c905ead39b5",
+             "unit_price": 6.40, "delivery_days": 7},
+            {"bid_id": "b2", "supplier_id": "0cc6a1f1-8442-5ce4-b5f7-6ba0985418ee",
+             "unit_price": 5.10, "delivery_days": 12},
+        ],
+        "governance": {},
+    }
+    resp = agentcore.invoke_agent_runtime(
+        agentRuntimeArn=arn,
+        runtimeSessionId=f"itest-bideval-{uuid.uuid4().hex}".ljust(33, "0"),
+        contentType="application/json",
+        accept="application/json",
+        payload=_a2a_message(json.dumps(request)),
+    )
+    assert resp["ResponseMetadata"]["HTTPStatusCode"] == 200
+    # The BidEvaluationResponse JSON is nested as an artifact text part.
+    body = resp["response"].read().decode()
+    assert "bid_evaluation_result" in body
+    assert "itest-bideval-neg-1" in body
+    assert "ranked_bids" in body
+    assert "recommendation" in body
+    assert "evaluation_metadata" in body
