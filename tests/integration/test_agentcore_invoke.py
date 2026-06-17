@@ -3,8 +3,8 @@
 Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1, because
 these actually invoke runtimes (billable, and may cold-start).
 
-- kraljic_classifier, spot_bidding, bid_evaluation, and leverage_auction carry real
-  A2A images and are asserted for real.
+- kraljic_classifier, spot_bidding, bid_evaluation, leverage_auction, and
+  strategic_partnership carry real A2A images and are asserted for real.
 - The remaining agents still hold ARM64 placeholder images that reject the invoke
   contract (HTTP 424), so they stay xfail until real images are deployed.
 """
@@ -226,3 +226,55 @@ def test_leverage_auction_invoke_runs_auction(agentcore, agentcore_control, tabl
     finally:
         for bid_id in seeded_bid_ids:
             bids.delete_item(Key={"tenant_id": TENANT, "bid_id": bid_id})
+
+
+def test_strategic_partnership_invoke_runs_negotiation(agentcore, agentcore_control):
+    """Real LLM-backed A2A invoke: a strategic partnership negotiation researches each
+    candidate (relationship history), assesses risk, computes TCO, sends proposals, and
+    recommends one of the candidate suppliers — full StrategicPartnershipResponse schema
+    (genuine tool use + the three prerequisite steering guards, not a templated stub).
+
+    The agent reads supplier rows from the live `dev-suppliers` table; no seeding needed."""
+    arn = _runtime_arn(agentcore_control, "dev_strategic_partnership")
+    candidate_ids = [
+        "377f9353-f38a-5e66-b706-f36021efc667",
+        "6ad37dd1-93c7-502b-ab70-75998e45612c",
+    ]
+    request = {
+        "negotiation_id": f"itest-strat-neg-{uuid.uuid4().hex}",
+        "tenant_id": TENANT,
+        "category_id": "784700a6-a316-5f45-a773-578052c89bcc",
+        "max_rounds": 3,
+        "budget_limit": 500000,
+        "target_price": 80,
+        "esg_threshold": 0.3,
+        "partnership_priorities": ["innovation", "quality", "supply_security", "cost"],
+        "items": [{"item_id": "i1", "description": "Precision machined assemblies",
+                   "quantity": 2000, "annual_volume": 2000}],
+        "strategic_suppliers": [
+            {"supplier_id": candidate_ids[0], "name": "Supplier 20", "email": "s20@example.com"},
+            {"supplier_id": candidate_ids[1], "name": "Supplier 8", "email": "s8@example.com"},
+        ],
+        "governance": {},
+    }
+    resp = agentcore.invoke_agent_runtime(
+        agentRuntimeArn=arn,
+        runtimeSessionId=f"itest-strat-{uuid.uuid4().hex}".ljust(33, "0"),
+        contentType="application/json",
+        accept="application/json",
+        payload=_a2a_message(json.dumps(request)),
+    )
+    assert resp["ResponseMetadata"]["HTTPStatusCode"] == 200
+    # The StrategicPartnershipResponse JSON is nested as an artifact text part.
+    body = resp["response"].read().decode()
+    assert request["negotiation_id"] in body
+    assert "tco_analysis" in body
+    assert "risk_assessment" in body
+    assert "relationship_impact" in body
+    assert "recommended_supplier_id" in body
+    assert "communication_log" in body
+    # The negotiation actually ran: the agent recommends one of the candidate suppliers
+    # (prerequisite guards force TCO/risk/history before the recommendation).
+    result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+    assert result["recommended_supplier_id"] in candidate_ids
+    assert result["tco_analysis"], "expected a TCO analysis per candidate"
