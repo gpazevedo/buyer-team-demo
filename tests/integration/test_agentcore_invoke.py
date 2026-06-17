@@ -3,8 +3,8 @@
 Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1, because
 these actually invoke runtimes (billable, and may cold-start).
 
-- kraljic_classifier, spot_bidding, and bid_evaluation carry real A2A images and
-  are asserted for real.
+- kraljic_classifier, spot_bidding, bid_evaluation, and leverage_auction carry real
+  A2A images and are asserted for real.
 - The remaining agents still hold ARM64 placeholder images that reject the invoke
   contract (HTTP 424), so they stay xfail until real images are deployed.
 """
@@ -13,6 +13,8 @@ import os
 import uuid
 
 import pytest
+
+from .conftest import TENANT
 
 _INVOKE_ENABLED = os.getenv("RUN_INTEGRATION_INVOKE") == "1"
 
@@ -153,3 +155,74 @@ def test_bid_evaluation_invoke_ranks_bids(agentcore, agentcore_control):
     assert "ranked_bids" in body
     assert "recommendation" in body
     assert "evaluation_metadata" in body
+
+
+def test_leverage_auction_invoke_runs_auction(agentcore, agentcore_control, table):
+    """Real LLM-backed A2A invoke: a leverage auction invites each qualified supplier,
+    collects + ranks the round's bids (read from the seeded `dev-bids` rows), and returns
+    the full AuctionResponse schema (genuine multi-round tool use, not a templated stub).
+
+    The leverage agent prices bids from the negotiation's real supplier rows, so we seed
+    three unpriced bid rows (a fresh negotiation per run for isolation) and clean them up."""
+    arn = _runtime_arn(agentcore_control, "dev_leverage_auction")
+    negotiation_id = f"itest-lev-neg-{uuid.uuid4().hex}"
+    suppliers = [
+        ("aaa11111-0000-0000-0000-000000000001", 8, "a@example.com"),
+        ("bbb22222-0000-0000-0000-000000000002", 12, "b@example.com"),
+        ("ccc33333-0000-0000-0000-000000000003", 20, "c@example.com"),
+    ]
+    bids = table("dev-bids")
+    seeded_bid_ids = []
+    for supplier_id, delivery_days, _ in suppliers:
+        bid_id = uuid.uuid4().hex
+        seeded_bid_ids.append(bid_id)
+        bids.put_item(Item={
+            "tenant_id": TENANT, "bid_id": bid_id, "negotiation_id": negotiation_id,
+            "supplier_id": supplier_id, "delivery_days": delivery_days,
+            "status": "INVITED", "currency": "USD",
+        })
+    try:
+        request = {
+            "negotiation_id": negotiation_id,
+            "tenant_id": TENANT,
+            "max_rounds": 3,
+            "round_duration_hours": 24,
+            "budget_limit": 80000,
+            "target_price": 60000,
+            "items": [{"item_id": "i1", "description": "steel fasteners", "quantity": 500}],
+            "qualified_suppliers": [
+                {"supplier_id": s, "name": s[:3].upper(), "email": e}
+                for s, _, e in suppliers
+            ],
+            "governance": {},
+        }
+        resp = agentcore.invoke_agent_runtime(
+            agentRuntimeArn=arn,
+            runtimeSessionId=f"itest-lev-{uuid.uuid4().hex}".ljust(33, "0"),
+            contentType="application/json",
+            accept="application/json",
+            payload=_a2a_message(json.dumps(request)),
+        )
+        assert resp["ResponseMetadata"]["HTTPStatusCode"] == 200
+        # The AuctionResponse JSON is nested as an artifact text part.
+        body = resp["response"].read().decode()
+        assert negotiation_id in body
+        assert "final_bids" in body
+        assert "all_round_bids" in body
+        assert "price_reduction_pct" in body
+        assert "convergence_reached" in body
+        assert "participation_rate" in body
+        assert "communication_log" in body
+        # The auction actually ran against the seeded rows: the seeded suppliers come
+        # back as final bids with real prices (the model derives them per round). Rank
+        # is left unasserted — the small-tier structured_output coercion doesn't reliably
+        # re-emit per-bid rank, but bid identity + pricing prove genuine tool use.
+        result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+        assert result["final_bids"], "expected final bids from the seeded suppliers"
+        seeded_ids = {s for s, _, _ in suppliers}
+        returned_ids = {b["supplier_id"] for b in result["final_bids"]}
+        assert returned_ids & seeded_ids, "final bids should reference the seeded suppliers"
+        assert all(b["total_price"] > 0 for b in result["final_bids"])
+    finally:
+        for bid_id in seeded_bid_ids:
+            bids.delete_item(Key={"tenant_id": TENANT, "bid_id": bid_id})
