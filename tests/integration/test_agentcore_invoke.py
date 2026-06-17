@@ -278,3 +278,60 @@ def test_strategic_partnership_invoke_runs_negotiation(agentcore, agentcore_cont
     result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
     assert result["recommended_supplier_id"] in candidate_ids
     assert result["tco_analysis"], "expected a TCO analysis per candidate"
+
+
+def test_bottleneck_negotiation_invoke_runs_negotiation(agentcore, agentcore_control):
+    """Real LLM-backed A2A invoke: a bottleneck negotiation assesses risk, computes TCO,
+    sends supply-security proposals, and recommends one of the candidate suppliers plus a
+    backup for concentration-risk mitigation — full BottleneckNegotiationResponse schema
+    (genuine tool use + the two prerequisite steering guards, not a templated stub).
+
+    The TCO/risk tools are pure + DynamoDB-cached; no seeding needed."""
+    arn = _runtime_arn(agentcore_control, "dev_bottleneck_negotiation")
+    candidate_ids = [
+        "377f9353-f38a-5e66-b706-f36021efc667",
+        "6ad37dd1-93c7-502b-ab70-75998e45612c",
+    ]
+    request = {
+        "negotiation_id": f"itest-bottleneck-neg-{uuid.uuid4().hex}",
+        "tenant_id": TENANT,
+        "category_id": "784700a6-a316-5f45-a773-578052c89bcc",
+        "max_rounds": 3,
+        "budget_limit": 300000,
+        "target_price": 120,
+        "esg_threshold": 0.3,
+        "risk_priorities": ["supply_security", "delivery_reliability", "concentration_risk"],
+        "items": [{"item_id": "i1", "description": "Specialty alloy castings",
+                   "quantity": 1500, "annual_volume": 1500}],
+        "candidate_suppliers": [
+            {"supplier_id": candidate_ids[0], "name": "Supplier 20", "email": "s20@example.com"},
+            {"supplier_id": candidate_ids[1], "name": "Supplier 8", "email": "s8@example.com"},
+        ],
+        "governance": {},
+    }
+    resp = agentcore.invoke_agent_runtime(
+        agentRuntimeArn=arn,
+        runtimeSessionId=f"itest-bottleneck-{uuid.uuid4().hex}".ljust(33, "0"),
+        contentType="application/json",
+        accept="application/json",
+        payload=_a2a_message(json.dumps(request)),
+    )
+    assert resp["ResponseMetadata"]["HTTPStatusCode"] == 200
+    # The BottleneckNegotiationResponse JSON is nested as an artifact text part.
+    body = resp["response"].read().decode()
+    assert request["negotiation_id"] in body
+    assert "tco_analysis" in body
+    assert "risk_assessment" in body
+    assert "backup_supplier_recommendation" in body
+    assert "recommended_supplier_id" in body
+    assert "communication_log" in body
+    # The negotiation actually ran: the agent recommends one of the candidate suppliers
+    # (prerequisite guards force TCO/risk before the recommendation).
+    result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+    assert result["recommended_supplier_id"] in candidate_ids
+    assert result["tco_analysis"], "expected a TCO analysis per candidate"
+    # §2.4-specific output: a backup supplier for concentration-risk mitigation —
+    # populated, one of the candidates, and distinct from the winner.
+    backup = result["backup_supplier_recommendation"]
+    assert backup in candidate_ids, "expected a backup supplier from the candidate set"
+    assert backup != result["recommended_supplier_id"], "backup must differ from the winner"
