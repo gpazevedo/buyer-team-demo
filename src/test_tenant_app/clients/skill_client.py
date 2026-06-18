@@ -92,7 +92,11 @@ class SkillClient:
     def get_items(self, tenant_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
             return _load("items.json")
-        return _query_by_tenant("items", tenant_id)
+        # Domain stores `estimated_unit_price`; the app contract is `estimated_price`.
+        rows = _query_by_tenant("items", tenant_id)
+        for r in rows:
+            r.setdefault("estimated_price", r.get("estimated_unit_price", 0))
+        return rows
 
     def get_negotiations(self, tenant_id: str) -> list[dict]:
         return []

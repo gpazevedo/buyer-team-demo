@@ -73,6 +73,53 @@ def _build_order(tenant_id: str, pr: dict) -> dict:
     }
 
 
+# Negotiation strategy → the strategy node label shown on the PR Tracker.
+_STRATEGY_NODE = {
+    "SPOT_BID": "spot_bidding",
+    "LEVERAGE_AUCTION": "leverage_auction",
+    "BOTTLENECK_NEGOTIATION": "bottleneck_negotiation",
+    "STRATEGIC_PARTNERSHIP": "strategic_partnership",
+}
+
+
+def _synthesize_graph_nodes(tenant_id: str, pr: dict) -> dict:
+    """Derive the workflow-node states the PR Tracker renders from live signals.
+
+    Orchestrator nodes only write `ingest_validate` into the requisition row, so the
+    panel would otherwise show a single node. Reconstruct the rest (lowercase states
+    the frontend colour-maps) from the negotiation lifecycle + the requisition's own
+    `order_ids`, without depending on every node back-writing its progress."""
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    status = pr.get("status")
+    if status in ("CANCELLED",):
+        return {"ingest": "completed"}
+    nodes = {"ingest": "completed"}
+    negs = dynamo_client.get_negotiations(tenant_id, pr["requisition_id"])
+    if not negs:
+        return nodes  # ingest only; negotiation not created yet
+    neg = negs[0]
+    has_order = bool(pr.get("order_ids"))
+    approval = (neg.get("approval_decision") or neg.get("approval_status") or "").upper()
+    awarded = neg.get("status") == "COMPLETED" or has_order  # normalized AWARDED→COMPLETED
+    failed = status == "FAILED"
+
+    nodes["kraljic"] = "completed" if neg.get("kraljic_quadrant") else "in_progress"
+    strat_node = _STRATEGY_NODE.get(neg.get("strategy"), "negotiation")
+    nodes[strat_node] = "completed" if awarded else "in_progress"
+    nodes["bid_evaluation"] = "completed" if awarded else ("in_progress" if not failed else "failed")
+    if status == "PENDING_HUMAN_APPROVAL":
+        nodes["approval"] = "in_progress"
+    elif approval in ("REJECTED",):
+        nodes["approval"] = "failed"
+    elif approval in ("AUTO_APPROVED", "APPROVED"):
+        nodes["approval"] = "completed"
+    else:
+        nodes["approval"] = "pending"
+    nodes["award"] = "completed" if has_order else ("in_progress" if nodes["approval"] == "completed" else "pending")
+    return nodes
+
+
 class MasterDataClient:
     def create_pr(
         self,
@@ -139,7 +186,11 @@ class MasterDataClient:
         item = table("requisitions").get_item(
             Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"}
         ).get("Item")
-        return to_native(item) if item else None
+        if not item:
+            return None
+        pr = to_native(item)
+        pr["graph_nodes"] = _synthesize_graph_nodes(tenant_id, pr)
+        return pr
 
     def approve_pr(self, tenant_id: str, requisition_id: str) -> dict:
         if SKILL_MODE == "stub":
