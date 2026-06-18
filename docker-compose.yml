@@ -14,6 +14,8 @@ services:
       DEV_TENANT_ID: 6eb4ebaf-804e-5837-ae26-f665a76b58dd
       # Live PR→PO trigger (SKILL_MODE=live). Empty under the default stub mode.
       STATE_MACHINE_ARN: ${STATE_MACHINE_ARN:-}
+      # Node 6 Approval Gate Lambda — /approve + /cancel release its paused token.
+      APPROVAL_GATE_FUNCTION: ${APPROVAL_GATE_FUNCTION:-dev-buyer-team-node6-approval-gate}
     depends_on:
       - dynamodb-local
       - localstack

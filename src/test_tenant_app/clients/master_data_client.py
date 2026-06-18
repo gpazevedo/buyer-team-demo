@@ -151,8 +151,11 @@ class MasterDataClient:
                 pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
                 _stub_orders.append(_build_order(tenant_id, pr))
             return {"status": "COMPLETED", "requisition_id": requisition_id}
-        self._set_status(tenant_id, requisition_id, "COMPLETED")
-        return {"status": "COMPLETED", "requisition_id": requisition_id}
+        # live: release the paused Approval Gate token; Node 7 issues the PO and
+        # sets the requisition COMPLETED — the API must not pre-empt that here.
+        from test_tenant_app.clients.graph_client import graph_client
+
+        return graph_client.approve_award(tenant_id, requisition_id)
 
     def cancel_pr(self, tenant_id: str, requisition_id: str) -> dict:
         if SKILL_MODE == "stub":
@@ -162,6 +165,11 @@ class MasterDataClient:
                 pr["status"] = "CANCELLED"
                 pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
             return {"status": "CANCELLED", "requisition_id": requisition_id}
+        # live: release any paused approval token as REJECTED so the execution does
+        # not hang (no-op if nothing is paused), then mark the requisition CANCELLED.
+        from test_tenant_app.clients.graph_client import graph_client
+
+        graph_client.reject_award(tenant_id, requisition_id, reason="tenant_cancelled")
         self._set_status(tenant_id, requisition_id, "CANCELLED")
         return {"status": "CANCELLED", "requisition_id": requisition_id}
 
