@@ -12,6 +12,8 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       DYNAMODB_ENDPOINT: http://dynamodb-local:8000
       DEV_TENANT_ID: 6eb4ebaf-804e-5837-ae26-f665a76b58dd
+      # Live PR→PO trigger (SKILL_MODE=live). Empty under the default stub mode.
+      STATE_MACHINE_ARN: ${STATE_MACHINE_ARN:-}
     depends_on:
       - dynamodb-local
       - localstack

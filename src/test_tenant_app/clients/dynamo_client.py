@@ -38,6 +38,22 @@ def _table(name: str):
     return _ddb().Table(f"{ENV}-{name}")
 
 
+def _normalize_order(o: dict) -> dict:
+    """Map a Node-7-written PO row (`{env}-orders`) to the app's PurchaseOrder
+    contract. Node 7 (orchestrator/node_award_comms.py) persists `total_price`,
+    `created_at` (epoch), and `item_ids`; the app model expects `total_value`,
+    `received_at`, `line_items`, and savings fields (savings are informational and
+    not computed by the award node, so they default to 0)."""
+    return {
+        **o,
+        "total_value": o.get("total_value", o.get("total_price", 0.0)),
+        "savings_amount": o.get("savings_amount", 0.0),
+        "savings_pct": o.get("savings_pct", 0.0),
+        "received_at": o.get("received_at") or o.get("created_at"),
+        "line_items": o.get("line_items", []),
+    }
+
+
 class DynamoClient:
     def count_items(self, tenant_id: str) -> int:
         """Count items for the test tenant (spans country-tenant partitions)."""
@@ -107,7 +123,7 @@ class DynamoClient:
             return [d for d in data if d["tenant_id"] == tenant_id]
         # Orders key on (pk, sk); no tenant GSI, so scan-filter by tenant_id.
         resp = _live_table("orders").scan(FilterExpression=Attr("tenant_id").eq(tenant_id))
-        return to_native(resp.get("Items", []))
+        return [_normalize_order(o) for o in to_native(resp.get("Items", []))]
 
     def get_order(self, tenant_id: str, order_id: str) -> dict | None:
         if SKILL_MODE == "stub":
@@ -119,7 +135,7 @@ class DynamoClient:
         item = _live_table("orders").get_item(
             Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"}
         ).get("Item")
-        return to_native(item) if item else None
+        return _normalize_order(to_native(item)) if item else None
 
 
 dynamo_client = DynamoClient()

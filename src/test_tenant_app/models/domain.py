@@ -17,6 +17,7 @@ class KraljicQuadrant(StrEnum):
 
 class PRStatus(StrEnum):
     NEW = "NEW"
+    VALIDATED = "VALIDATED"
     ACTIVE = "ACTIVE"
     IN_NEGOTIATION = "IN_NEGOTIATION"
     PENDING_HUMAN_APPROVAL = "PENDING_HUMAN_APPROVAL"
