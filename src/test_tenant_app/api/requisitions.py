@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from test_tenant_app.auth.jwt import get_tenant_id
 from test_tenant_app.clients.dynamo_client import dynamo_client
-from test_tenant_app.clients.graph_client import graph_client
 from test_tenant_app.clients.master_data_client import master_data_client
 from test_tenant_app.clients.skill_client import skill_client
 from test_tenant_app.models import (
@@ -30,6 +29,9 @@ def create_requisition(
         {**items_map.get(it.item_id, {}), "item_id": it.item_id, "quantity": it.quantity, "estimated_price": it.estimated_price or items_map.get(it.item_id, {}).get("estimated_price", 0)}
         for it in body.items
     ]
+    # Canonical path: persisting the PR to the master store is the trigger — its
+    # DynamoDB Stream drives pr_event_router → ingest_pr → start_negotiation_workflow.
+    # No direct app→Step Functions call.
     pr = master_data_client.create_pr(
         tenant_id=tenant_id,
         items=items,
@@ -38,7 +40,6 @@ def create_requisition(
         delivery_ideal_days=body.delivery_ideal_days,
         budget_limit=body.budget_limit_override,
     )
-    graph_client.ingest_pr(tenant_id, pr["requisition_id"])
     return PurchaseRequisition(**pr)
 
 

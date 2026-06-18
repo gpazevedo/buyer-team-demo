@@ -48,11 +48,12 @@ def test_dataset_status_live():
     assert r.json()["categories"] >= 20
 
 
-def test_pr_create_get_cancel_roundtrip_live():
-    # Persist directly via the client (not POST /api/requisitions): the create
-    # endpoint now fires the live workflow trigger (graph_client.ingest_pr →
-    # start_execution), which the doubly-opt-in test_e2e_pr_to_po_live covers.
-    # This test stays a focused persistence + cancel roundtrip.
+def test_pr_create_writes_master_store_live():
+    # Canonical seam: create_pr writes a NEW PR to the tenant master store
+    # ({env}-test-tenant-master-purchase-requisitions). The DynamoDB Stream →
+    # pr-event-router → ingest_pr chain (covered by the doubly-opt-in
+    # test_e2e_pr_to_po_live) then drives the workflow — the app no longer triggers
+    # Step Functions directly. This test stays a focused master-store persistence check.
     from test_tenant_app.clients.ddb import table
     from test_tenant_app.clients.master_data_client import master_data_client
 
@@ -65,15 +66,15 @@ def test_pr_create_get_cancel_roundtrip_live():
     rid = created["requisition_id"]
     assert created["status"] == "NEW"
 
+    master = table("test-tenant-master-purchase-requisitions")
     try:
-        # Persisted and readable back from DynamoDB.
-        got = client.get(f"/api/requisitions/{rid}")
-        assert got.status_code == 200
-        assert got.json()["requisition_id"] == rid
-
-        # Cancel updates the persisted row.
-        cancelled = client.post(f"/api/requisitions/{rid}/cancel")
-        assert cancelled.status_code == 200
-        assert client.get(f"/api/requisitions/{rid}").json()["status"] == "CANCELLED"
+        row = master.get_item(
+            Key={"tenant_id": TENANT, "requisition_id": rid}
+        ).get("Item")
+        assert row is not None, "PR not written to the master store"
+        assert row["status"] == "NEW"
+        # The sort keys the emulator's list tools page on are present.
+        assert row["status_sk"].startswith("NEW#")
+        assert row["lm_sk"].endswith(f"#{rid}")
     finally:
-        table("requisitions").delete_item(Key={"pk": f"{TENANT}#{rid}", "sk": "metadata"})
+        master.delete_item(Key={"tenant_id": TENANT, "requisition_id": rid})

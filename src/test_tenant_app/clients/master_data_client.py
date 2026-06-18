@@ -2,7 +2,12 @@
 MCP servers (PRD-015 §4).
 
 SKILL_MODE=stub  returns fixture data.
-SKILL_MODE=live  calls AgentCore Gateway (not yet wired).
+SKILL_MODE=live  canonical event-driven path: create_pr writes the PR to the tenant
+                 master store ({env}-test-tenant-master-purchase-requisitions) at
+                 status NEW. The table's DynamoDB Stream → pr_event_router →
+                 ingest_pr → start_negotiation_workflow chain drives the workflow
+                 (no direct app→Step Functions trigger). See IMPLEMENTATION_PLAN.md
+                 "return to the canonical design".
 """
 from __future__ import annotations
 
@@ -70,6 +75,32 @@ def _build_order(tenant_id: str, pr: dict) -> dict:
         "savings_pct": award.get("savings_pct", 0.0),
         "received_at": datetime.now(tz=timezone.utc).isoformat(),
         "award_id": award.get("award_id"),
+    }
+
+
+def _master_pr_item(tenant_id: str, requisition_id: str, pr: dict,
+                    created: datetime) -> dict:
+    """Build the canonical tenant master-store PR row (PRD-015 §3).
+
+    Keys: tenant_id (hash) / requisition_id (range). Carries the lm_idx/status_idx
+    sort keys the emulator's list tools page on, plus the fields ingest_pr copies
+    into the domain {env}-requisitions row. Items keep the app's rich line-item
+    shape — Node 1 normalizes bare-id and rich-dict items alike."""
+    ts = created.isoformat()
+    return {
+        "tenant_id": tenant_id,
+        "requisition_id": requisition_id,
+        "status": "NEW",
+        "last_modified": ts,
+        "lm_sk": f"{ts}#{requisition_id}",
+        "status_sk": f"NEW#{ts}#{requisition_id}",
+        "created_at": pr["created_at"],
+        "items": pr["items"],
+        "delivery_address": pr["delivery_address"],
+        "delivery_threshold_days": pr["delivery_threshold_days"],
+        "delivery_ideal_days": pr["delivery_ideal_days"],
+        "budget_override": pr.get("budget_limit"),
+        "source_system": "test-tenant-app",
     }
 
 
@@ -164,10 +195,14 @@ class MasterDataClient:
             pr["_created_ts"] = time.time()
             _stub_requisitions[f"{tenant_id}:{requisition_id}"] = pr
             return pr
-        # live: persist to {env}-requisitions (pk/sk per skills/integration/ingest_pr).
+        # live (canonical): write the PR to the tenant master store at status NEW.
+        # The table's DynamoDB Stream → pr_event_router → ingest_pr upserts the domain
+        # {env}-requisitions row (VALIDATED) and starts the negotiation workflow — the
+        # app does NOT trigger Step Functions directly.
         from test_tenant_app.clients.ddb import table, to_decimal
-        item = {"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata", **pr}
-        table("requisitions").put_item(Item=to_decimal(item))
+        table("test-tenant-master-purchase-requisitions").put_item(
+            Item=to_decimal(_master_pr_item(tenant_id, requisition_id, pr, now))
+        )
         return pr
 
     def get_pr(self, tenant_id: str, requisition_id: str) -> dict | None:

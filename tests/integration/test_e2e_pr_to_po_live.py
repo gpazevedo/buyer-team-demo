@@ -1,13 +1,15 @@
-"""Live end-to-end test: PR → PO through the deployed Step Functions DAG.
+"""Live end-to-end test: PR → PO through the canonical event-driven chain.
 
 The SKILL_MODE=live sibling to ../test_e2e_pr_to_po.py (PRD-013 Phase 6a /
-REQ-TT400): POST a NON_CRITICAL requisition, let the real orchestrator run the
-negotiation, and assert a Purchase Order surfaces at /api/orders with the
-requisition COMPLETED.
+REQ-TT400): POST a NON_CRITICAL requisition, let the canonical chain run — the app
+writes the PR to the master store, whose DynamoDB Stream → pr_event_router →
+ingest_pr starts the Step Functions negotiation — and assert a Purchase Order
+surfaces at /api/orders with the requisition COMPLETED.
 
-Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1 — it starts
-a real execution that invokes the agent runtimes (billable, cold-start-prone, and
-requires the VPC NAT to be up so the private subnets have egress).
+Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1. It needs the
+canonical chain deployed (master store stream + pr-event-router) and starts a real
+execution that invokes the agent runtimes (billable, cold-start-prone, and requires
+the VPC NAT to be up so the private subnets have egress).
 """
 import os
 
@@ -16,17 +18,23 @@ os.environ["AUTH_MODE"] = "dev"
 os.environ.setdefault("ENV", "dev")
 
 import time  # noqa: E402
+from uuid import NAMESPACE_DNS, uuid5  # noqa: E402
 
 import boto3  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from test_tenant_app.auth.jwt import DEV_TENANT_ID  # noqa: E402
-from test_tenant_app.clients.graph_client import _execution_name  # noqa: E402
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import PurchaseOrder  # noqa: E402
 
 from .conftest import REGION  # noqa: E402
+
+
+def _execution_name(tenant_id: str, requisition_id: str) -> str:
+    """The deterministic per-PR execution name the pr-event-router starts (mirrors
+    mcp_servers/step_functions_orchestrator)."""
+    return "neg-" + str(uuid5(NAMESPACE_DNS, f"{tenant_id}:negotiation:{requisition_id}"))
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_INTEGRATION_INVOKE") != "1",
@@ -45,8 +53,8 @@ _TERMINAL = {"SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED"}
 
 @pytest.fixture(scope="module", autouse=True)
 def _state_machine_arn():
-    """Resolve and export the deployed state machine ARN (graph_client reads
-    STATE_MACHINE_ARN at call time)."""
+    """Resolve the deployed state machine ARN so the test can poll the execution
+    the pr-event-router starts (by its deterministic name)."""
     sfn = boto3.client("stepfunctions", region_name=REGION)
     arn = next(
         (m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
