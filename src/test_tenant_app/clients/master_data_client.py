@@ -224,6 +224,10 @@ class MasterDataClient:
         if not item:
             return None
         pr = to_native(item)
+        # The canonical-path domain row (pr_event_router ingest + orchestrator node
+        # writes) carries created_at but not updated_at; the app contract requires it.
+        # Normalize at the read boundary (same seam as the other live-mode field gaps).
+        pr.setdefault("updated_at", pr.get("created_at"))
         pr["graph_nodes"] = _synthesize_graph_nodes(tenant_id, pr)
         return pr
 

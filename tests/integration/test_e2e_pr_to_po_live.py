@@ -85,7 +85,13 @@ def test_pr_to_po_live(_state_machine_arn):
 
     status = None
     for _ in range(60):  # up to ~5 min; real agents + cold start
-        status = sfn.describe_execution(executionArn=exec_arn)["status"]
+        try:
+            status = sfn.describe_execution(executionArn=exec_arn)["status"]
+        except sfn.exceptions.ExecutionDoesNotExist:
+            # Eventual consistency: the master-store write → Stream → pr-event-router
+            # → StartExecution chain takes a moment, so the execution may not exist on
+            # the first polls. Keep waiting.
+            status = None
         if status in _TERMINAL:
             break
         time.sleep(5)
