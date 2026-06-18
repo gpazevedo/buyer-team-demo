@@ -60,20 +60,21 @@ class GraphClient:
         """
         if SKILL_MODE == "stub":
             return {"status": "accepted", "requisition_id": requisition_id}
-        if not STATE_MACHINE_ARN:
+        state_machine_arn = os.getenv("STATE_MACHINE_ARN", STATE_MACHINE_ARN)
+        if not state_machine_arn:
             raise RuntimeError("STATE_MACHINE_ARN not configured")
         self._mark_validated(tenant_id, requisition_id)
         name = _execution_name(tenant_id, requisition_id)
         payload = json.dumps({"tenant_id": tenant_id, "requisition_id": requisition_id})
         try:
             resp = _sfn().start_execution(
-                stateMachineArn=STATE_MACHINE_ARN, name=name, input=payload
+                stateMachineArn=state_machine_arn, name=name, input=payload
             )
             logger.info("started negotiation %s for PR %s", name, requisition_id)
             return {"status": "started", "execution_arn": resp["executionArn"],
                     "requisition_id": requisition_id}
         except _sfn().exceptions.ExecutionAlreadyExists:
-            arn = STATE_MACHINE_ARN.replace(":stateMachine:", ":execution:") + f":{name}"
+            arn = state_machine_arn.replace(":stateMachine:", ":execution:") + f":{name}"
             return {"status": "already_started", "execution_arn": arn,
                     "requisition_id": requisition_id}
 

@@ -49,17 +49,21 @@ def test_dataset_status_live():
 
 
 def test_pr_create_get_cancel_roundtrip_live():
+    # Persist directly via the client (not POST /api/requisitions): the create
+    # endpoint now fires the live workflow trigger (graph_client.ingest_pr →
+    # start_execution), which the doubly-opt-in test_e2e_pr_to_po_live covers.
+    # This test stays a focused persistence + cancel roundtrip.
     from test_tenant_app.clients.ddb import table
+    from test_tenant_app.clients.master_data_client import master_data_client
 
-    payload = {
-        "items": [{"item_id": "item-001", "quantity": 3, "estimated_price": 10.0}],
-        "delivery_address": "123 Live Test St",
-        "delivery_threshold_days": 14,
-    }
-    created = client.post("/api/requisitions", json=payload)
-    assert created.status_code == 201
-    rid = created.json()["requisition_id"]
-    assert created.json()["status"] == "NEW"
+    created = master_data_client.create_pr(
+        tenant_id=TENANT,
+        items=[{"item_id": "item-001", "quantity": 3, "estimated_price": 10.0}],
+        delivery_address="123 Live Test St",
+        delivery_threshold_days=14,
+    )
+    rid = created["requisition_id"]
+    assert created["status"] == "NEW"
 
     try:
         # Persisted and readable back from DynamoDB.
