@@ -1,20 +1,79 @@
 """SkillClient — calls the Test Tenant Skill (PRD-012).
 
 SKILL_MODE=stub  reads JSON fixtures from the fixtures/ directory.
-SKILL_MODE=live  calls the real AgentCore Gateway (not implemented yet).
+SKILL_MODE=live  invokes the real AgentCore MCP runtime (dev_skill_runtime).
 """
 from __future__ import annotations
 
 import json
 import os
+import uuid
+from functools import cache
 from pathlib import Path
+
+import boto3
 
 SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
+_REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+_RUNTIME_NAME = f"{os.getenv('ENV', 'dev')}_skill_runtime"
+_MCP_PROTOCOL_VERSION = "2024-11-05"
 
 
 def _load(name: str):
     return json.loads((_FIXTURES / name).read_text())
+
+
+@cache
+def _control_client():
+    return boto3.client("bedrock-agentcore-control", region_name=_REGION)
+
+
+@cache
+def _runtime_client():
+    return boto3.client("bedrock-agentcore", region_name=_REGION)
+
+
+@cache
+def _skill_runtime_arn() -> str:
+    for r in _control_client().list_agent_runtimes().get("agentRuntimes", []):
+        if r["agentRuntimeName"] == _RUNTIME_NAME:
+            return r["agentRuntimeArn"]
+    raise RuntimeError(f"Skill runtime {_RUNTIME_NAME!r} not found")
+
+
+def _invoke_skill_tool(tool_name: str, arguments: dict) -> dict:
+    """Invoke a tool on the AgentCore MCP skill runtime and return the result dict."""
+    call_id = uuid.uuid4().hex
+    payload = json.dumps({
+        "jsonrpc": "2.0",
+        "id": call_id,
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": arguments},
+    }).encode()
+
+    resp = _runtime_client().invoke_agent_runtime(
+        agentRuntimeArn=_skill_runtime_arn(),
+        payload=payload,
+        qualifier="DEFAULT",
+        contentType="application/json",
+        accept="application/json, text/event-stream",
+        mcpProtocolVersion=_MCP_PROTOCOL_VERSION,
+    )
+
+    # Response is SSE: "event: message\ndata: {...}\n\n"
+    raw = resp["response"].read().decode()
+    for line in raw.splitlines():
+        if line.startswith("data: "):
+            envelope = json.loads(line[6:])
+            if "error" in envelope:
+                raise RuntimeError(f"Skill tool {tool_name!r} failed: {envelope['error']}")
+            # MCP result content is [{type: text, text: <json>}]
+            content = envelope.get("result", {}).get("content", [])
+            for part in content:
+                if part.get("type") == "text":
+                    return json.loads(part["text"])
+    raise RuntimeError(f"No result from skill tool {tool_name!r}")
 
 
 def _query_by_tenant(table_name: str, tenant_id: str) -> list[dict]:
@@ -61,17 +120,17 @@ class SkillClient:
     def load_datasets(self, tenant_id: str, datasets: list[str]) -> dict:
         if SKILL_MODE == "stub":
             return {"status": "ok", "datasets": datasets}
-        raise NotImplementedError("load runs via the skill runtime (not wired)")
+        return _invoke_skill_tool("load_datasets", {"tenant_id": tenant_id, "datasets": datasets})
 
     def validate_datasets(self, tenant_id: str) -> dict:
         if SKILL_MODE == "stub":
             return {"valid": True, "issues": []}
-        raise NotImplementedError("validate runs via the skill runtime (not wired)")
+        return _invoke_skill_tool("validate_datasets", {"tenant_id": tenant_id})
 
     def reset_tenant_data(self, tenant_id: str) -> dict:
         if SKILL_MODE == "stub":
             return {"status": "reset"}
-        raise NotImplementedError("reset runs via the skill runtime (not wired)")
+        return _invoke_skill_tool("reset", {"tenant_id": tenant_id})
 
     def get_categories(self, tenant_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
