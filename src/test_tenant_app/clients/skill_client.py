@@ -12,6 +12,9 @@ from functools import cache
 from pathlib import Path
 
 import boto3
+from opentelemetry import propagate, trace
+
+_tracer = trace.get_tracer("buyer-team.app.skill-client")
 
 SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -43,37 +46,48 @@ def _skill_runtime_arn() -> str:
 
 
 def _invoke_skill_tool(tool_name: str, arguments: dict) -> dict:
-    """Invoke a tool on the AgentCore MCP skill runtime and return the result dict."""
+    """Invoke a tool on the AgentCore MCP skill runtime and return the result dict.
+
+    Wrapped in a client span whose W3C trace context is injected into the JSON-RPC
+    `params._meta`; the skill runtime extracts it (AgentCore does not forward HTTP
+    headers, but the request body is), so the app→skill hop is one distributed trace.
+    """
     call_id = uuid.uuid4().hex
-    payload = json.dumps({
-        "jsonrpc": "2.0",
-        "id": call_id,
-        "method": "tools/call",
-        "params": {"name": tool_name, "arguments": arguments},
-    }).encode()
+    with _tracer.start_as_current_span(f"skill-client.{tool_name}"):
+        params: dict = {"name": tool_name, "arguments": arguments}
+        carrier: dict = {}
+        propagate.inject(carrier)
+        if carrier:
+            params["_meta"] = carrier
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "id": call_id,
+            "method": "tools/call",
+            "params": params,
+        }).encode()
 
-    resp = _runtime_client().invoke_agent_runtime(
-        agentRuntimeArn=_skill_runtime_arn(),
-        payload=payload,
-        qualifier="DEFAULT",
-        contentType="application/json",
-        accept="application/json, text/event-stream",
-        mcpProtocolVersion=_MCP_PROTOCOL_VERSION,
-    )
+        resp = _runtime_client().invoke_agent_runtime(
+            agentRuntimeArn=_skill_runtime_arn(),
+            payload=payload,
+            qualifier="DEFAULT",
+            contentType="application/json",
+            accept="application/json, text/event-stream",
+            mcpProtocolVersion=_MCP_PROTOCOL_VERSION,
+        )
 
-    # Response is SSE: "event: message\ndata: {...}\n\n"
-    raw = resp["response"].read().decode()
-    for line in raw.splitlines():
-        if line.startswith("data: "):
-            envelope = json.loads(line[6:])
-            if "error" in envelope:
-                raise RuntimeError(f"Skill tool {tool_name!r} failed: {envelope['error']}")
-            # MCP result content is [{type: text, text: <json>}]
-            content = envelope.get("result", {}).get("content", [])
-            for part in content:
-                if part.get("type") == "text":
-                    return json.loads(part["text"])
-    raise RuntimeError(f"No result from skill tool {tool_name!r}")
+        # Response is SSE: "event: message\ndata: {...}\n\n"
+        raw = resp["response"].read().decode()
+        for line in raw.splitlines():
+            if line.startswith("data: "):
+                envelope = json.loads(line[6:])
+                if "error" in envelope:
+                    raise RuntimeError(f"Skill tool {tool_name!r} failed: {envelope['error']}")
+                # MCP result content is [{type: text, text: <json>}]
+                content = envelope.get("result", {}).get("content", [])
+                for part in content:
+                    if part.get("type") == "text":
+                        return json.loads(part["text"])
+        raise RuntimeError(f"No result from skill tool {tool_name!r}")
 
 
 def _query_by_tenant(table_name: str, tenant_id: str) -> list[dict]:

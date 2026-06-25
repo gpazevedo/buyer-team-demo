@@ -6,8 +6,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from test_tenant_app.api import catalog, datasets, orders, requisitions
+from test_tenant_app.observability import setup_tracing
 
 logger = structlog.get_logger()
+
+setup_tracing()  # tracer provider so skill-client spans propagate to the skill runtime
 
 app = FastAPI(
     title="Buyer Team Test Tenant App",
