@@ -4,11 +4,11 @@ test tenant's seeded data is present and readable.
 A read failure here (e.g. KMSInvalidStateException) surfaces an environment
 problem — encryption key inaccessible, data wiped — rather than a code bug.
 """
+
+import pytest
 from boto3.dynamodb.conditions import Key
 
 from .conftest import TABLE_KEY_SCHEMA, TENANT
-
-import pytest
 
 
 @pytest.mark.parametrize("name,schema", sorted(TABLE_KEY_SCHEMA.items()))
@@ -36,7 +36,5 @@ def test_test_tenant_suppliers_seeded(ddb):
 
 
 def test_test_tenant_record_exists(ddb):
-    item = ddb.Table("dev-tenants").get_item(
-        Key={"pk": TENANT, "sk": "metadata"}
-    ).get("Item")
+    item = ddb.Table("dev-tenants").get_item(Key={"pk": TENANT, "sk": "metadata"}).get("Item")
     assert item is not None

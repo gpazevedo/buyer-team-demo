@@ -1,4 +1,5 @@
 """Buyer Team Test Tenant App — FastAPI entry point."""
+
 import time
 
 import structlog

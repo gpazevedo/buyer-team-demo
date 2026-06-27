@@ -3,6 +3,7 @@
 SKILL_MODE=stub  reads JSON fixtures from the fixtures/ directory.
 SKILL_MODE=live  invokes the real AgentCore MCP runtime (dev_skill_runtime).
 """
+
 from __future__ import annotations
 
 import json
@@ -59,12 +60,14 @@ def _invoke_skill_tool(tool_name: str, arguments: dict) -> dict:
         propagate.inject(carrier)
         if carrier:
             params["_meta"] = carrier
-        payload = json.dumps({
-            "jsonrpc": "2.0",
-            "id": call_id,
-            "method": "tools/call",
-            "params": params,
-        }).encode()
+        payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": call_id,
+                "method": "tools/call",
+                "params": params,
+            }
+        ).encode()
 
         resp = _runtime_client().invoke_agent_runtime(
             agentRuntimeArn=_skill_runtime_arn(),
@@ -116,12 +119,16 @@ class SkillClient:
 
         from test_tenant_app.clients.ddb import table
 
-        cats = table("categories").query(
-            KeyConditionExpression=Key("tenant_id").eq(tenant_id), Select="COUNT"
-        ).get("Count", 0)
-        sups = table("suppliers").query(
-            KeyConditionExpression=Key("tenant_id").eq(tenant_id), Select="COUNT"
-        ).get("Count", 0)
+        cats = (
+            table("categories")
+            .query(KeyConditionExpression=Key("tenant_id").eq(tenant_id), Select="COUNT")
+            .get("Count", 0)
+        )
+        sups = (
+            table("suppliers")
+            .query(KeyConditionExpression=Key("tenant_id").eq(tenant_id), Select="COUNT")
+            .get("Count", 0)
+        )
         return {
             "tenant_id": tenant_id,
             "categories": cats,

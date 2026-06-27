@@ -3,9 +3,9 @@
 State progression in stub mode is wall-clock based; tests drive it deterministically
 by backdating the PR's creation timestamp via the `_set_pr_age` seam.
 """
+
 import os
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("SKILL_MODE", "stub")
@@ -137,9 +137,7 @@ def test_e2e_order_retrievable_by_id():
     _drive_to_completion(rid)
 
     order_id = next(
-        o["order_id"]
-        for o in client.get("/api/orders").json()
-        if o["requisition_id"] == rid
+        o["order_id"] for o in client.get("/api/orders").json() if o["requisition_id"] == rid
     )
     r = client.get(f"/api/orders/{order_id}")
     assert r.status_code == 200

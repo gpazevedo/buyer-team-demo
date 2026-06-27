@@ -18,6 +18,7 @@ self-contained — it works on any tenant state without pre-seeded fixtures.
 Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1. Requires
 the VPC NAT to be up (agents need egress to Bedrock) and all 8 AgentCore runtimes READY.
 """
+
 from __future__ import annotations
 
 import os
@@ -33,7 +34,6 @@ from uuid import NAMESPACE_DNS, uuid5  # noqa: E402
 import boto3  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-
 from test_tenant_app.auth.jwt import DEV_TENANT_ID  # noqa: E402
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import PurchaseOrder  # noqa: E402
@@ -55,9 +55,9 @@ _NON_CRITICAL_ITEM = "92f3123c-b678-583d-9c8e-004c2ee7126a"
 
 # One well-known category per non-NON_CRITICAL quadrant, each with a supplier configured.
 _CAT = {
-    "LEVERAGE":   "8c5c8667-9749-5b32-995b-825e463e9af7",  # IT Services
+    "LEVERAGE": "8c5c8667-9749-5b32-995b-825e463e9af7",  # IT Services
     "BOTTLENECK": "4bc6a266-3565-5982-9616-bd6d9bda22a1",  # Logistics
-    "STRATEGIC":  "6491a8c6-6418-53fc-9892-9790587d61b7",  # Maintenance
+    "STRATEGIC": "6491a8c6-6418-53fc-9892-9790587d61b7",  # Maintenance
 }
 
 # Quadrants that always trigger HITL regardless of price/quality.
@@ -67,6 +67,7 @@ _ALWAYS_HITL = {"BOTTLENECK", "STRATEGIC"}
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
 
 def _execution_name(requisition_id: str) -> str:
     return "neg-" + str(uuid5(NAMESPACE_DNS, f"{TENANT}:negotiation:{requisition_id}"))
@@ -81,9 +82,12 @@ def _ddb_table(suffix: str):
 
 
 def _neg(negotiation_id: str) -> dict:
-    return _ddb_table("negotiations").get_item(
-        Key={"tenant_id": TENANT, "negotiation_id": negotiation_id}
-    ).get("Item") or {}
+    return (
+        _ddb_table("negotiations")
+        .get_item(Key={"tenant_id": TENANT, "negotiation_id": negotiation_id})
+        .get("Item")
+        or {}
+    )
 
 
 def _item_id(quadrant: str) -> str:
@@ -95,12 +99,16 @@ def _item_id(quadrant: str) -> str:
 # fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module", autouse=True)
 def state_machine_arn():
     sfn = boto3.client("stepfunctions", region_name=REGION)
     arn = next(
-        (m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
-         if m["name"].startswith(f"{ENV}-buyer-team-procurement")),
+        (
+            m["stateMachineArn"]
+            for m in sfn.list_state_machines()["stateMachines"]
+            if m["name"].startswith(f"{ENV}-buyer-team-procurement")
+        ),
         None,
     )
     if not arn:
@@ -140,6 +148,7 @@ def test_items():
 # core run helper
 # ---------------------------------------------------------------------------
 
+
 def _run_pr_to_po(state_machine_arn: str, item_id: str, quadrant: str) -> None:
     """Post a PR, drive the SFN DAG to completion, assert PO ISSUED.
 
@@ -150,15 +159,20 @@ def _run_pr_to_po(state_machine_arn: str, item_id: str, quadrant: str) -> None:
     """
     sfn = boto3.client("stepfunctions", region_name=REGION)
 
-    resp = client.post("/api/requisitions", json={
-        "items": [{"item_id": item_id, "quantity": 1, "estimated_price": 80.0}],
-        "delivery_address": f"1 E2E Test St ({quadrant})",
-        "delivery_threshold_days": 30,
-    })
+    resp = client.post(
+        "/api/requisitions",
+        json={
+            "items": [{"item_id": item_id, "quantity": 1, "estimated_price": 80.0}],
+            "delivery_address": f"1 E2E Test St ({quadrant})",
+            "delivery_threshold_days": 30,
+        },
+    )
     assert resp.status_code == 201, f"[{quadrant}] create PR failed: {resp.text}"
     rid = resp.json()["requisition_id"]
     neg_id = _negotiation_id(rid)
-    exec_arn = state_machine_arn.replace(":stateMachine:", ":execution:") + f":{_execution_name(rid)}"
+    exec_arn = (
+        state_machine_arn.replace(":stateMachine:", ":execution:") + f":{_execution_name(rid)}"
+    )
 
     sfn_status = None
     approved = False
@@ -166,7 +180,11 @@ def _run_pr_to_po(state_machine_arn: str, item_id: str, quadrant: str) -> None:
     for _ in range(90):  # up to ~7.5 min; multi-round agent loops + cold-start
         neg = _neg(neg_id)
 
-        if not approved and neg.get("status") == "PENDING_APPROVAL" and neg.get("approval_task_token"):
+        if (
+            not approved
+            and neg.get("status") == "PENDING_APPROVAL"
+            and neg.get("approval_task_token")
+        ):
             ar = client.post(f"/api/requisitions/{rid}/approve")
             assert ar.status_code == 200, f"[{quadrant}] approve failed: {ar.text}"
             approved = True
@@ -200,6 +218,7 @@ def _run_pr_to_po(state_machine_arn: str, item_id: str, quadrant: str) -> None:
 # ---------------------------------------------------------------------------
 # tests — one per quadrant
 # ---------------------------------------------------------------------------
+
 
 def test_non_critical_pr_to_po(state_machine_arn):
     """NON_CRITICAL → SPOT_BID (spot_bidding agent) → auto-approve → PO ISSUED."""

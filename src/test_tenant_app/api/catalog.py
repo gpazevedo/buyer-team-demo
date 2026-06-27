@@ -1,4 +1,5 @@
 """Catalog endpoints: categories, suppliers, items, negotiations."""
+
 from fastapi import APIRouter, Depends
 
 from test_tenant_app.auth.jwt import get_tenant_id
@@ -19,6 +20,7 @@ def get_category(category_id: str, tenant_id: str = Depends(get_tenant_id)):
     match = next((c for c in cats if c["category_id"] == category_id), None)
     if not match:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Category not found")
     return Category(**match)
 
@@ -34,6 +36,7 @@ def get_supplier(supplier_id: str, tenant_id: str = Depends(get_tenant_id)):
     match = next((s for s in sups if s["supplier_id"] == supplier_id), None)
     if not match:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Supplier not found")
     return Supplier(**match)
 

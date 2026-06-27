@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends
 
 from test_tenant_app.auth.jwt import get_tenant_id
@@ -6,8 +8,6 @@ from test_tenant_app.clients.master_data_client import master_data_client
 from test_tenant_app.clients.skill_client import skill_client
 from test_tenant_app.models import DatasetStatus, KraljicThresholds, LoadDatasetsRequest
 from test_tenant_app.models.datasets import PhaseLoadStatus, PhaseStatus
-
-import os
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 ENV = os.getenv("ENV", "dev")

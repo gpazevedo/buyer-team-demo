@@ -5,6 +5,7 @@ for the test-tenant because items live under country tenants).
 
 ENV=dev uses dynamodb-local (DYNAMODB_ENDPOINT env var).
 """
+
 from __future__ import annotations
 
 import json
@@ -45,7 +46,7 @@ def _epoch(v):
         return None
     try:
         return int(float(v))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return v
 
 
@@ -56,12 +57,12 @@ def _supplier_name_map(tenant_id: str) -> dict[str, str]:
     """Cached {supplier_id: name} for a tenant — Node-written bid/award/order rows
     carry only supplier_id; the app contract surfaces supplier_name."""
     if tenant_id not in _supplier_names:
-        rows = _live_table("suppliers").query(
-            KeyConditionExpression=Key("tenant_id").eq(tenant_id)
-        ).get("Items", [])
-        _supplier_names[tenant_id] = {
-            r["supplier_id"]: r.get("name") for r in to_native(rows)
-        }
+        rows = (
+            _live_table("suppliers")
+            .query(KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+            .get("Items", [])
+        )
+        _supplier_names[tenant_id] = {r["supplier_id"]: r.get("name") for r in to_native(rows)}
     return _supplier_names[tenant_id]
 
 
@@ -154,8 +155,26 @@ class DynamoClient:
     def get_negotiations(self, tenant_id: str, requisition_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
             return [
-                {"negotiation_id": f"neg-{requisition_id[:8]}-1", "requisition_id": requisition_id, "tenant_id": tenant_id, "supplier_id": "supplier-001", "supplier_name": "Office Pro Supplies", "status": "COMPLETED", "started_at": None, "completed_at": None},
-                {"negotiation_id": f"neg-{requisition_id[:8]}-2", "requisition_id": requisition_id, "tenant_id": tenant_id, "supplier_id": "supplier-002", "supplier_name": "Global Office Solutions", "status": "COMPLETED", "started_at": None, "completed_at": None},
+                {
+                    "negotiation_id": f"neg-{requisition_id[:8]}-1",
+                    "requisition_id": requisition_id,
+                    "tenant_id": tenant_id,
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "status": "COMPLETED",
+                    "started_at": None,
+                    "completed_at": None,
+                },
+                {
+                    "negotiation_id": f"neg-{requisition_id[:8]}-2",
+                    "requisition_id": requisition_id,
+                    "tenant_id": tenant_id,
+                    "supplier_id": "supplier-002",
+                    "supplier_name": "Global Office Solutions",
+                    "status": "COMPLETED",
+                    "started_at": None,
+                    "completed_at": None,
+                },
             ]
         # Negotiations key on (tenant_id, negotiation_id); query by requisition
         # through the requisition_index GSI (see skills/integration/ingest_pr).
@@ -170,8 +189,30 @@ class DynamoClient:
     def get_bids(self, tenant_id: str, requisition_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
             return [
-                {"bid_id": f"bid-{requisition_id[:8]}-1", "requisition_id": requisition_id, "negotiation_id": f"neg-{requisition_id[:8]}-1", "supplier_id": "supplier-001", "supplier_name": "Office Pro Supplies", "total_amount": 132.50, "currency": "USD", "lead_time_days": 5, "submitted_at": None, "is_best_bid": True},
-                {"bid_id": f"bid-{requisition_id[:8]}-2", "requisition_id": requisition_id, "negotiation_id": f"neg-{requisition_id[:8]}-2", "supplier_id": "supplier-002", "supplier_name": "Global Office Solutions", "total_amount": 145.00, "currency": "USD", "lead_time_days": 7, "submitted_at": None, "is_best_bid": False},
+                {
+                    "bid_id": f"bid-{requisition_id[:8]}-1",
+                    "requisition_id": requisition_id,
+                    "negotiation_id": f"neg-{requisition_id[:8]}-1",
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "total_amount": 132.50,
+                    "currency": "USD",
+                    "lead_time_days": 5,
+                    "submitted_at": None,
+                    "is_best_bid": True,
+                },
+                {
+                    "bid_id": f"bid-{requisition_id[:8]}-2",
+                    "requisition_id": requisition_id,
+                    "negotiation_id": f"neg-{requisition_id[:8]}-2",
+                    "supplier_id": "supplier-002",
+                    "supplier_name": "Global Office Solutions",
+                    "total_amount": 145.00,
+                    "currency": "USD",
+                    "lead_time_days": 7,
+                    "submitted_at": None,
+                    "is_best_bid": False,
+                },
             ]
         # Bids link to a requisition via their negotiation (no requisition GSI).
         neg_ids = {n["negotiation_id"] for n in self.get_negotiations(tenant_id, requisition_id)}
@@ -190,7 +231,17 @@ class DynamoClient:
     def get_awards(self, tenant_id: str, requisition_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
             return [
-                {"award_id": f"award-{requisition_id[:8]}", "requisition_id": requisition_id, "bid_id": f"bid-{requisition_id[:8]}-1", "supplier_id": "supplier-001", "supplier_name": "Office Pro Supplies", "total_amount": 132.50, "savings_amount": 12.50, "savings_pct": 8.6, "awarded_at": None},
+                {
+                    "award_id": f"award-{requisition_id[:8]}",
+                    "requisition_id": requisition_id,
+                    "bid_id": f"bid-{requisition_id[:8]}-1",
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "total_amount": 132.50,
+                    "savings_amount": 12.50,
+                    "savings_pct": 8.6,
+                    "awarded_at": None,
+                },
             ]
         # Awards link to a requisition via their winning bid (no requisition GSI).
         bid_ids = {b["bid_id"] for b in self.get_bids(tenant_id, requisition_id)}
@@ -224,18 +275,22 @@ class DynamoClient:
             data = json.loads((_FIXTURES / "orders.json").read_text())
             data += _stub_orders
             return next((d for d in data if d["order_id"] == order_id), None)
-        item = _live_table("orders").get_item(
-            Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"}
-        ).get("Item")
+        item = (
+            _live_table("orders")
+            .get_item(Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"})
+            .get("Item")
+        )
         if not item:
             return None
         order = _normalize_order(to_native(item))
         # The PO row stores only `item_ids`; surface the ordered line items (names,
         # quantities, prices) from the originating requisition for the detail view.
         if not order["line_items"] and order.get("requisition_id"):
-            req = _live_table("requisitions").get_item(
-                Key={"pk": f"{tenant_id}#{order['requisition_id']}", "sk": "metadata"}
-            ).get("Item")
+            req = (
+                _live_table("requisitions")
+                .get_item(Key={"pk": f"{tenant_id}#{order['requisition_id']}", "sk": "metadata"})
+                .get("Item")
+            )
             if req:
                 order["line_items"] = to_native(req).get("items", [])
         return order

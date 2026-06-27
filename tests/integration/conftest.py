@@ -4,6 +4,7 @@ These tests run against the live dev environment. They are skipped entirely
 unless RUN_INTEGRATION=1 (enforced by the parent tests/conftest.py) and are
 further skipped if AWS credentials are not resolvable.
 """
+
 from __future__ import annotations
 
 from functools import cache
@@ -44,7 +45,9 @@ TABLE_KEY_SCHEMA = {
 _CFG = Config(connect_timeout=10, read_timeout=30, retries={"mode": "adaptive", "max_attempts": 4})
 # Data-plane agent invocations run an LLM tool loop (+ structured_output) that can
 # take a few minutes; the 30s read timeout above is only right for control-plane/DDB.
-_INVOKE_CFG = Config(connect_timeout=10, read_timeout=300, retries={"mode": "adaptive", "max_attempts": 2})
+_INVOKE_CFG = Config(
+    connect_timeout=10, read_timeout=300, retries={"mode": "adaptive", "max_attempts": 2}
+)
 
 
 @cache

@@ -1,14 +1,14 @@
+from .datasets import DatasetStatus, KraljicThresholds, PhaseStatus
 from .domain import (
+    Award,
+    Bid,
     Category,
-    Supplier,
     Item,
     Negotiation,
-    Bid,
-    Award,
-    PurchaseRequisition,
     PurchaseOrder,
+    PurchaseRequisition,
+    Supplier,
 )
-from .datasets import DatasetStatus, KraljicThresholds, PhaseStatus
 from .requests import CreateRequisitionRequest, LoadDatasetsRequest
 
 __all__ = [

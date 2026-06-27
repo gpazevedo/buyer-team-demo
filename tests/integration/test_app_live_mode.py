@@ -7,15 +7,14 @@ Validates the wired live clients end-to-end through the API:
 SKILL_MODE=live must be set before importing the app (clients read it at import).
 Opt-in via RUN_INTEGRATION=1 (parent conftest) + AWS credentials.
 """
+
 import os
 
 os.environ["SKILL_MODE"] = "live"
 os.environ["AUTH_MODE"] = "dev"
 os.environ.setdefault("ENV", "dev")
 
-import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-
 from test_tenant_app.auth.jwt import DEV_TENANT_ID  # noqa: E402
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import Category, Supplier  # noqa: E402
@@ -68,9 +67,7 @@ def test_pr_create_writes_master_store_live():
 
     master = table("test-tenant-master-purchase-requisitions")
     try:
-        row = master.get_item(
-            Key={"tenant_id": TENANT, "requisition_id": rid}
-        ).get("Item")
+        row = master.get_item(Key={"tenant_id": TENANT, "requisition_id": rid}).get("Item")
         assert row is not None, "PR not written to the master store"
         assert row["status"] == "NEW"
         # The sort keys the emulator's list tools page on are present.

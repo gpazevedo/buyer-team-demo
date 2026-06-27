@@ -1,4 +1,5 @@
 """Domain entity models — Pydantic v2, source of truth for the OpenAPI contract."""
+
 from __future__ import annotations
 
 from datetime import datetime

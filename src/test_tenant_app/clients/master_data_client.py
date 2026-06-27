@@ -9,6 +9,7 @@ SKILL_MODE=live  canonical event-driven path: create_pr writes the PR to the ten
                  (no direct app→Step Functions trigger). See IMPLEMENTATION_PLAN.md
                  "return to the canonical design".
 """
+
 from __future__ import annotations
 
 import os
@@ -45,10 +46,19 @@ def _advance_stub_state(pr: dict) -> dict:
         pr["graph_nodes"] = {"ingest": "completed"}
     elif elapsed < 20:
         pr["status"] = "IN_NEGOTIATION"
-        pr["graph_nodes"] = {"ingest": "completed", "spot_bidding": "in_progress", "bid_evaluation": "pending"}
+        pr["graph_nodes"] = {
+            "ingest": "completed",
+            "spot_bidding": "in_progress",
+            "bid_evaluation": "pending",
+        }
     else:
         pr["status"] = "PENDING_HUMAN_APPROVAL"
-        pr["graph_nodes"] = {"ingest": "completed", "spot_bidding": "completed", "bid_evaluation": "completed", "award": "pending"}
+        pr["graph_nodes"] = {
+            "ingest": "completed",
+            "spot_bidding": "completed",
+            "bid_evaluation": "completed",
+            "award": "pending",
+        }
     pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
     return pr
 
@@ -78,8 +88,7 @@ def _build_order(tenant_id: str, pr: dict) -> dict:
     }
 
 
-def _master_pr_item(tenant_id: str, requisition_id: str, pr: dict,
-                    created: datetime) -> dict:
+def _master_pr_item(tenant_id: str, requisition_id: str, pr: dict, created: datetime) -> dict:
     """Build the canonical tenant master-store PR row (PRD-015 §3).
 
     Keys: tenant_id (hash) / requisition_id (range). Carries the lm_idx/status_idx
@@ -138,7 +147,9 @@ def _synthesize_graph_nodes(tenant_id: str, pr: dict) -> dict:
     nodes["kraljic"] = "completed" if neg.get("kraljic_quadrant") else "in_progress"
     strat_node = _STRATEGY_NODE.get(neg.get("strategy"), "negotiation")
     nodes[strat_node] = "completed" if awarded else "in_progress"
-    nodes["bid_evaluation"] = "completed" if awarded else ("in_progress" if not failed else "failed")
+    nodes["bid_evaluation"] = (
+        "completed" if awarded else ("in_progress" if not failed else "failed")
+    )
     if status == "PENDING_HUMAN_APPROVAL":
         nodes["approval"] = "in_progress"
     elif approval in ("REJECTED",):
@@ -147,7 +158,11 @@ def _synthesize_graph_nodes(tenant_id: str, pr: dict) -> dict:
         nodes["approval"] = "completed"
     else:
         nodes["approval"] = "pending"
-    nodes["award"] = "completed" if has_order else ("in_progress" if nodes["approval"] == "completed" else "pending")
+    nodes["award"] = (
+        "completed"
+        if has_order
+        else ("in_progress" if nodes["approval"] == "completed" else "pending")
+    )
     return nodes
 
 
@@ -200,6 +215,7 @@ class MasterDataClient:
         # {env}-requisitions row (VALIDATED) and starts the negotiation workflow — the
         # app does NOT trigger Step Functions directly.
         from test_tenant_app.clients.ddb import table, to_decimal
+
         table("test-tenant-master-purchase-requisitions").put_item(
             Item=to_decimal(_master_pr_item(tenant_id, requisition_id, pr, now))
         )
@@ -213,14 +229,20 @@ class MasterDataClient:
             # If no in-memory PR, return stub fixture for demo
             import json
             from pathlib import Path
-            data = json.loads((Path(__file__).parent.parent / "fixtures" / "requisition.json").read_text())
+
+            data = json.loads(
+                (Path(__file__).parent.parent / "fixtures" / "requisition.json").read_text()
+            )
             if data["requisition_id"] == requisition_id:
                 return data
             return None
         from test_tenant_app.clients.ddb import table, to_native
-        item = table("requisitions").get_item(
-            Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"}
-        ).get("Item")
+
+        item = (
+            table("requisitions")
+            .get_item(Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"})
+            .get("Item")
+        )
         if not item:
             return None
         pr = to_native(item)
@@ -265,6 +287,7 @@ class MasterDataClient:
 
     def _set_status(self, tenant_id: str, requisition_id: str, status: str) -> None:
         from test_tenant_app.clients.ddb import table
+
         table("requisitions").update_item(
             Key={"pk": f"{tenant_id}#{requisition_id}", "sk": "metadata"},
             UpdateExpression="SET #s = :s, updated_at = :u",
@@ -284,13 +307,13 @@ class MasterDataClient:
         if SKILL_MODE == "stub":
             return {"profit_impact": 0.5, "supply_risk": 0.5}
         # live: read from DynamoDB {env}-system-config
-        import boto3
         import json as _json
+
+        import boto3
+
         ddb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
         table = ddb.Table(f"{env}-system-config")
-        resp = table.get_item(
-            Key={"config_group": "kraljic", "config_key": "thresholds"}
-        )
+        resp = table.get_item(Key={"config_group": "kraljic", "config_key": "thresholds"})
         item = resp.get("Item")
         if item:
             return _json.loads(item["config_json"])

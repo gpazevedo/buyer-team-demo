@@ -5,6 +5,7 @@ propagates to the skill runtime (see clients/skill_client.py). Spans export via
 OTLP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set; otherwise the provider still mints
 valid span contexts so propagation works even without a local collector.
 """
+
 from __future__ import annotations
 
 import os

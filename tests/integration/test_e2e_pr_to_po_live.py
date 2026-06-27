@@ -20,6 +20,7 @@ Two tests:
 Doubly opt-in: needs RUN_INTEGRATION=1 *and* RUN_INTEGRATION_INVOKE=1. Requires
 the canonical chain deployed and the VPC NAT up (agents need Bedrock egress).
 """
+
 import os
 
 os.environ["SKILL_MODE"] = "live"
@@ -33,7 +34,6 @@ from uuid import NAMESPACE_DNS, uuid5  # noqa: E402
 import boto3  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-
 from test_tenant_app.auth.jwt import DEV_TENANT_ID  # noqa: E402
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import PurchaseOrder  # noqa: E402
@@ -45,6 +45,7 @@ def _execution_name(tenant_id: str, requisition_id: str) -> str:
     """The deterministic per-PR execution name the pr-event-router starts (mirrors
     mcp_servers/step_functions_orchestrator)."""
     return "neg-" + str(uuid5(NAMESPACE_DNS, f"{tenant_id}:negotiation:{requisition_id}"))
+
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_INTEGRATION_INVOKE") != "1",
@@ -67,8 +68,11 @@ def _state_machine_arn():
     the pr-event-router starts (by its deterministic name)."""
     sfn = boto3.client("stepfunctions", region_name=REGION)
     arn = next(
-        (m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
-         if m["name"].startswith(f"{ENV}-buyer-team-procurement")),
+        (
+            m["stateMachineArn"]
+            for m in sfn.list_state_machines()["stateMachines"]
+            if m["name"].startswith(f"{ENV}-buyer-team-procurement")
+        ),
         None,
     )
     if not arn:
@@ -137,7 +141,8 @@ def suppress_quality_gate():
     prior = cfg.get("approval_thresholds", {}).get("negotiation_quality_composite_minimum")
     cfg.setdefault("approval_thresholds", {})["negotiation_quality_composite_minimum"] = 0.0
     cfg_table.update_item(
-        Key=key, UpdateExpression="SET config_json = :j",
+        Key=key,
+        UpdateExpression="SET config_json = :j",
         ExpressionAttributeValues={":j": json.dumps(cfg)},
     )
     try:
@@ -150,7 +155,8 @@ def suppress_quality_gate():
         else:
             cfg["approval_thresholds"]["negotiation_quality_composite_minimum"] = prior
         cfg_table.update_item(
-            Key=key, UpdateExpression="SET config_json = :j",
+            Key=key,
+            UpdateExpression="SET config_json = :j",
             ExpressionAttributeValues={":j": json.dumps(cfg)},
         )
 
@@ -194,10 +200,16 @@ def test_non_critical_auto_approve(_state_machine_arn, suppress_quality_gate):
     # Assert the gate never paused: if PENDING_APPROVAL were ever set, the execution
     # would still be RUNNING when we check (not SUCCEEDED) — but make the intent explicit.
     neg_id = str(__import__("uuid").uuid5(NAMESPACE_DNS, f"{TENANT}:negotiation:{rid}"))
-    neg = boto3.resource("dynamodb", region_name=REGION).Table(f"{ENV}-negotiations").get_item(
-        Key={"tenant_id": TENANT, "negotiation_id": neg_id}
-    ).get("Item") or {}
-    assert neg.get("status") != "PENDING_APPROVAL", "unexpected HITL pause with suppressed quality gate"
+    neg = (
+        boto3.resource("dynamodb", region_name=REGION)
+        .Table(f"{ENV}-negotiations")
+        .get_item(Key={"tenant_id": TENANT, "negotiation_id": neg_id})
+        .get("Item")
+        or {}
+    )
+    assert neg.get("status") != "PENDING_APPROVAL", (
+        "unexpected HITL pause with suppressed quality gate"
+    )
 
     pr = client.get(f"/api/requisitions/{rid}").json()
     assert pr["status"] == "COMPLETED", pr

@@ -1,4 +1,5 @@
 """Smoke: AWS credentials resolve and point at the expected dev account."""
+
 from .conftest import ACCOUNT_ID, REGION
 
 

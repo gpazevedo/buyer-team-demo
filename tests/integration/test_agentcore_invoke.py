@@ -8,6 +8,7 @@ these actually invoke runtimes (billable, and may cold-start).
 - The remaining agents still hold ARM64 placeholder images that reject the invoke
   contract (HTTP 424), so they stay xfail until real images are deployed.
 """
+
 import json
 import os
 import uuid
@@ -130,13 +131,27 @@ def test_bid_evaluation_invoke_ranks_bids(agentcore, agentcore_control):
         "category_id": "784700a6-a316-5f45-a773-578052c89bcc",
         "budget_limit": 10000,
         "esg_threshold": 0.3,
-        "evaluation_weights": {"cost": 0.4, "delivery": 0.2, "quality": 0.2, "esg": 0.1, "history": 0.1},
+        "evaluation_weights": {
+            "cost": 0.4,
+            "delivery": 0.2,
+            "quality": 0.2,
+            "esg": 0.1,
+            "history": 0.1,
+        },
         "items": [{"item_id": "itest-item-1", "delivery_ideal_days": 7, "quantity": 100}],
         "bids": [
-            {"bid_id": "b1", "supplier_id": "04caf9a7-4359-50c2-b458-9c905ead39b5",
-             "unit_price": 6.40, "delivery_days": 7},
-            {"bid_id": "b2", "supplier_id": "0cc6a1f1-8442-5ce4-b5f7-6ba0985418ee",
-             "unit_price": 5.10, "delivery_days": 12},
+            {
+                "bid_id": "b1",
+                "supplier_id": "04caf9a7-4359-50c2-b458-9c905ead39b5",
+                "unit_price": 6.40,
+                "delivery_days": 7,
+            },
+            {
+                "bid_id": "b2",
+                "supplier_id": "0cc6a1f1-8442-5ce4-b5f7-6ba0985418ee",
+                "unit_price": 5.10,
+                "delivery_days": 12,
+            },
         ],
         "governance": {},
     }
@@ -176,11 +191,17 @@ def test_leverage_auction_invoke_runs_auction(agentcore, agentcore_control, tabl
     for supplier_id, delivery_days, _ in suppliers:
         bid_id = uuid.uuid4().hex
         seeded_bid_ids.append(bid_id)
-        bids.put_item(Item={
-            "tenant_id": TENANT, "bid_id": bid_id, "negotiation_id": negotiation_id,
-            "supplier_id": supplier_id, "delivery_days": delivery_days,
-            "status": "INVITED", "currency": "USD",
-        })
+        bids.put_item(
+            Item={
+                "tenant_id": TENANT,
+                "bid_id": bid_id,
+                "negotiation_id": negotiation_id,
+                "supplier_id": supplier_id,
+                "delivery_days": delivery_days,
+                "status": "INVITED",
+                "currency": "USD",
+            }
+        )
     try:
         request = {
             "negotiation_id": negotiation_id,
@@ -191,8 +212,7 @@ def test_leverage_auction_invoke_runs_auction(agentcore, agentcore_control, tabl
             "target_price": 60000,
             "items": [{"item_id": "i1", "description": "steel fasteners", "quantity": 500}],
             "qualified_suppliers": [
-                {"supplier_id": s, "name": s[:3].upper(), "email": e}
-                for s, _, e in suppliers
+                {"supplier_id": s, "name": s[:3].upper(), "email": e} for s, _, e in suppliers
             ],
             "governance": {},
         }
@@ -249,8 +269,14 @@ def test_strategic_partnership_invoke_runs_negotiation(agentcore, agentcore_cont
         "target_price": 80,
         "esg_threshold": 0.3,
         "partnership_priorities": ["innovation", "quality", "supply_security", "cost"],
-        "items": [{"item_id": "i1", "description": "Precision machined assemblies",
-                   "quantity": 2000, "annual_volume": 2000}],
+        "items": [
+            {
+                "item_id": "i1",
+                "description": "Precision machined assemblies",
+                "quantity": 2000,
+                "annual_volume": 2000,
+            }
+        ],
         "strategic_suppliers": [
             {"supplier_id": candidate_ids[0], "name": "Supplier 20", "email": "s20@example.com"},
             {"supplier_id": candidate_ids[1], "name": "Supplier 8", "email": "s8@example.com"},
@@ -301,8 +327,14 @@ def test_bottleneck_negotiation_invoke_runs_negotiation(agentcore, agentcore_con
         "target_price": 120,
         "esg_threshold": 0.3,
         "risk_priorities": ["supply_security", "delivery_reliability", "concentration_risk"],
-        "items": [{"item_id": "i1", "description": "Specialty alloy castings",
-                   "quantity": 1500, "annual_volume": 1500}],
+        "items": [
+            {
+                "item_id": "i1",
+                "description": "Specialty alloy castings",
+                "quantity": 1500,
+                "annual_volume": 1500,
+            }
+        ],
         "candidate_suppliers": [
             {"supplier_id": candidate_ids[0], "name": "Supplier 20", "email": "s20@example.com"},
             {"supplier_id": candidate_ids[1], "name": "Supplier 8", "email": "s8@example.com"},

@@ -9,6 +9,7 @@ returns the task token Node 6 paused on so Node 7 can issue the PO.
 SKILL_MODE=stub  no-op acknowledgements.
 SKILL_MODE=live  invokes Node 6's resume_approval Lambda (APPROVED / REJECTED).
 """
+
 from __future__ import annotations
 
 import json
@@ -52,16 +53,16 @@ class GraphClient:
             return {"status": "approved"}
         return self._resume_approval(tenant_id, requisition_id, "APPROVED")
 
-    def reject_award(self, tenant_id: str, requisition_id: str,
-                     reason: str | None = None) -> dict:
+    def reject_award(self, tenant_id: str, requisition_id: str, reason: str | None = None) -> dict:
         """Release a paused Approval Gate with a REJECTED decision (cancels the
         negotiation + requisition). A no-op if nothing is paused."""
         if SKILL_MODE == "stub":
             return {"status": "rejected"}
         return self._resume_approval(tenant_id, requisition_id, "REJECTED", reason)
 
-    def _resume_approval(self, tenant_id: str, requisition_id: str, decision: str,
-                         reason: str | None = None) -> dict:
+    def _resume_approval(
+        self, tenant_id: str, requisition_id: str, decision: str, reason: str | None = None
+    ) -> dict:
         negotiation_id = _negotiation_id(tenant_id, requisition_id)
         payload = {
             "decision": decision,
@@ -77,8 +78,9 @@ class GraphClient:
             Payload=json.dumps(payload).encode(),
         )
         result = json.loads(resp["Payload"].read() or b"{}")
-        logger.info("resume_approval %s for PR %s -> %s",
-                    decision, requisition_id, result.get("status"))
+        logger.info(
+            "resume_approval %s for PR %s -> %s", decision, requisition_id, result.get("status")
+        )
         return result
 
 

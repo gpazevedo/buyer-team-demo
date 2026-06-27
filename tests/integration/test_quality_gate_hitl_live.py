@@ -16,6 +16,7 @@ endpoint, exercising the two paths that the auto-approve e2e never reaches:
 Doubly opt-in (RUN_INTEGRATION=1 + RUN_INTEGRATION_INVOKE=1): billable, needs the
 canonical chain deployed and the VPC NAT up (agents reachable).
 """
+
 import os
 
 os.environ["SKILL_MODE"] = "live"
@@ -29,7 +30,6 @@ from uuid import NAMESPACE_DNS, uuid5  # noqa: E402
 import boto3  # noqa: E402
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-
 from test_tenant_app.auth.jwt import DEV_TENANT_ID  # noqa: E402
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import PurchaseOrder  # noqa: E402
@@ -68,8 +68,11 @@ def sfn():
 @pytest.fixture(scope="module")
 def state_machine_arn(sfn):
     arn = next(
-        (m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
-         if m["name"].startswith(f"{ENV}-buyer-team-procurement")),
+        (
+            m["stateMachineArn"]
+            for m in sfn.list_state_machines()["stateMachines"]
+            if m["name"].startswith(f"{ENV}-buyer-team-procurement")
+        ),
         None,
     )
     if not arn:
@@ -89,9 +92,12 @@ def force_quality_gate():
     item = cfg_table.get_item(Key=key).get("Item") or {}
     cfg = json.loads(item["config_json"])
     prior = cfg.get("approval_thresholds", {}).get("negotiation_quality_composite_minimum")
-    cfg.setdefault("approval_thresholds", {})["negotiation_quality_composite_minimum"] = _FORCED_MINIMUM
+    cfg.setdefault("approval_thresholds", {})["negotiation_quality_composite_minimum"] = (
+        _FORCED_MINIMUM
+    )
     cfg_table.update_item(
-        Key=key, UpdateExpression="SET config_json = :j",
+        Key=key,
+        UpdateExpression="SET config_json = :j",
         ExpressionAttributeValues={":j": json.dumps(cfg)},
     )
     try:
@@ -104,7 +110,8 @@ def force_quality_gate():
         else:
             cfg["approval_thresholds"]["negotiation_quality_composite_minimum"] = prior
         cfg_table.update_item(
-            Key=key, UpdateExpression="SET config_json = :j",
+            Key=key,
+            UpdateExpression="SET config_json = :j",
             ExpressionAttributeValues={":j": json.dumps(cfg)},
         )
 
@@ -114,15 +121,19 @@ def _ddb_table(suffix: str):
 
 
 def _neg(negotiation_id: str) -> dict:
-    return _ddb_table("negotiations").get_item(
-        Key={"tenant_id": TENANT, "negotiation_id": negotiation_id}
-    ).get("Item") or {}
+    return (
+        _ddb_table("negotiations")
+        .get_item(Key={"tenant_id": TENANT, "negotiation_id": negotiation_id})
+        .get("Item")
+        or {}
+    )
 
 
 def _award(award_id: str) -> dict:
-    return _ddb_table("awards").get_item(
-        Key={"tenant_id": TENANT, "award_id": award_id}
-    ).get("Item") or {}
+    return (
+        _ddb_table("awards").get_item(Key={"tenant_id": TENANT, "award_id": award_id}).get("Item")
+        or {}
+    )
 
 
 def test_quality_gate_blocks_then_app_approves(sfn, state_machine_arn):
@@ -136,7 +147,9 @@ def test_quality_gate_blocks_then_app_approves(sfn, state_machine_arn):
     rid = created.json()["requisition_id"]
 
     negotiation_id = _negotiation_id(rid)
-    exec_arn = state_machine_arn.replace(":stateMachine:", ":execution:") + f":{_execution_name(rid)}"
+    exec_arn = (
+        state_machine_arn.replace(":stateMachine:", ":execution:") + f":{_execution_name(rid)}"
+    )
 
     # 1. The gate must PAUSE (not auto-approve). If the agent falls back (no composite)
     #    the price-only path would auto-approve — surface that as a clear skip cause.
@@ -149,7 +162,8 @@ def test_quality_gate_blocks_then_app_approves(sfn, state_machine_arn):
             if sfn.describe_execution(executionArn=exec_arn)["status"] in _TERMINAL:
                 pytest.fail(
                     "execution reached terminal without pausing — Node 5 likely produced "
-                    "no composite (agent fallback); rerun with warm agents")
+                    "no composite (agent fallback); rerun with warm agents"
+                )
         except sfn.exceptions.ExecutionDoesNotExist:
             pass
         time.sleep(5)

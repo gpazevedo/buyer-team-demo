@@ -1,7 +1,7 @@
 """Contract-shape tests for every endpoint (stub mode)."""
+
 import os
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("SKILL_MODE", "stub")
@@ -9,12 +9,12 @@ os.environ.setdefault("AUTH_MODE", "dev")
 
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import (  # noqa: E402
-    DatasetStatus,
-    PurchaseRequisition,
-    PurchaseOrder,
     Category,
-    Supplier,
+    DatasetStatus,
     Item,
+    PurchaseOrder,
+    PurchaseRequisition,
+    Supplier,
 )
 
 client = TestClient(app)

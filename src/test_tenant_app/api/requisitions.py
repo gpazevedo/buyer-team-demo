@@ -11,7 +11,6 @@ from test_tenant_app.models import (
     Negotiation,
     PurchaseRequisition,
 )
-from test_tenant_app.models.domain import NegotiationStatus
 
 router = APIRouter(prefix="/api/requisitions", tags=["requisitions"])
 
@@ -26,7 +25,13 @@ def create_requisition(
     items_raw = skill_client.get_items(tenant_id)
     items_map = {i["item_id"]: i for i in items_raw}
     items = [
-        {**items_map.get(it.item_id, {}), "item_id": it.item_id, "quantity": it.quantity, "estimated_price": it.estimated_price or items_map.get(it.item_id, {}).get("estimated_price", 0)}
+        {
+            **items_map.get(it.item_id, {}),
+            "item_id": it.item_id,
+            "quantity": it.quantity,
+            "estimated_price": it.estimated_price
+            or items_map.get(it.item_id, {}).get("estimated_price", 0),
+        }
         for it in body.items
     ]
     # Canonical path: persisting the PR to the master store is the trigger — its

@@ -5,6 +5,7 @@ AUTH_MODE=live — validate Cognito JWT via JWKS (PyJWT PyJWKClient);
                  extract `tenantId` (camelCase per PRD-005 §4.1 REQ-S707),
                  map to internal snake_case `tenant_id`.
 """
+
 from __future__ import annotations
 
 import os
