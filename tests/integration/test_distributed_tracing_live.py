@@ -121,6 +121,7 @@ def test_pr_to_po_is_one_distributed_trace(_state_machine_arn):
         _state_machine_arn.replace(":stateMachine:", ":execution:")
         + f":{_execution_name(TENANT, rid)}"
     )
+
     # The agent hops (spot_bidding/bid_evaluation `.execute`) all run BEFORE the human
     # ApprovalGate, which parks the run on a waitForTaskToken callback. So once the run
     # is terminal OR has reached ApprovalGate, the spans we assert on already exist — we
@@ -131,9 +132,7 @@ def test_pr_to_po_is_one_distributed_trace(_state_machine_arn):
                 return True
         except sfn.exceptions.ExecutionDoesNotExist:
             return False
-        hist = sfn.get_execution_history(
-            executionArn=exec_arn, maxResults=500, reverseOrder=True
-        )
+        hist = sfn.get_execution_history(executionArn=exec_arn, maxResults=500, reverseOrder=True)
         return any(
             e.get("stateEnteredEventDetails", {}).get("name") == "ApprovalGate"
             for e in hist["events"]
