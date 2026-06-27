@@ -66,21 +66,44 @@ def _supplier_name_map(tenant_id: str) -> dict[str, str]:
     return _supplier_names[tenant_id]
 
 
-def _normalize_order(o: dict) -> dict:
-    """Map a Node-7-written PO row (`{env}-orders`) to the app's PurchaseOrder
-    contract. Node 7 (orchestrator/node_award_comms.py) persists `total_price`,
-    `created_at` (epoch), `supplier_id`, and `item_ids`; the app model expects
-    `total_value`, `received_at`, `supplier_name`, `line_items`, and savings
-    fields (savings are informational, not computed by the award node)."""
-    names = _supplier_name_map(o["tenant_id"]) if o.get("tenant_id") else {}
+def _normalize_received_line(i: dict) -> dict:
+    """Map a canonical-PO line to the app's LineItem contract (`total_price`→`total`)."""
     return {
-        **o,
-        "total_value": o.get("total_value", o.get("total_price", 0.0)),
-        "supplier_name": o.get("supplier_name") or names.get(o.get("supplier_id")),
-        "savings_amount": o.get("savings_amount", 0.0),
-        "savings_pct": o.get("savings_pct", 0.0),
-        "received_at": _epoch(o.get("received_at") or o.get("created_at")),
-        "line_items": o.get("line_items", []),
+        "item_id": i.get("item_id", ""),
+        "sku": i.get("sku"),
+        "name": i.get("name", i.get("item_id", "")),
+        "quantity": int(i.get("quantity") or 0),
+        "unit_price": float(i.get("unit_price", 0) or 0),
+        "total": float(i.get("total", i.get("total_price", 0)) or 0),
+    }
+
+
+def _normalize_received_order(row: dict) -> dict:
+    """Map a PO Receiving row (`{env}-test-tenant-orders`) to the app's PurchaseOrder
+    contract. The Skill's `receive_purchase_order` / Node 7's delivery store the
+    canonical PO as a JSON string under `purchase_order`, plus `reception_status`,
+    `received_at` (ISO), and the `trace` chain; the app surfaces supplier, line items,
+    total value, savings, and the receiving status."""
+    raw = row.get("purchase_order")
+    po = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    supplier = po.get("supplier", {})
+    award = po.get("award", {})
+    return {
+        "order_id": row.get("order_id") or po.get("order_id"),
+        "requisition_id": row.get("requisition_id") or po.get("requisition_id"),
+        "tenant_id": row.get("tenant_id") or po.get("tenant_id"),
+        "supplier_id": supplier.get("supplier_id", ""),
+        "supplier_name": supplier.get("name") or supplier.get("supplier_name"),
+        "supplier_contact_email": supplier.get("email") or supplier.get("supplier_email"),
+        "status": row.get("reception_status", "RECEIVED"),
+        "line_items": [_normalize_received_line(i) for i in po.get("items", [])],
+        "total_value": float(po.get("total_price", 0) or 0),
+        "savings_amount": float(
+            award.get("savings_amount", award.get("savings_vs_budget", 0)) or 0
+        ),
+        "savings_pct": float(award.get("savings_pct", 0) or 0),
+        "received_at": row.get("received_at"),
+        "award_id": award.get("award_id"),
     }
 
 
@@ -264,9 +287,13 @@ class DynamoClient:
             data = json.loads((_FIXTURES / "orders.json").read_text())
             data += _stub_orders
             return [d for d in data if d["tenant_id"] == tenant_id]
-        # Orders key on (pk, sk); no tenant GSI, so scan-filter by tenant_id.
-        resp = _live_table("orders").scan(FilterExpression=Attr("tenant_id").eq(tenant_id))
-        return [_normalize_order(o) for o in to_native(resp.get("Items", []))]
+        # PO Inbox reads the PO Receiving domain (`{env}-test-tenant-orders`), where the
+        # PR→PO chain delivers finished POs (PRD-013 §2). Rows key on (pk, sk); no tenant
+        # GSI, so scan-filter by tenant_id (test-tenant scale).
+        resp = _live_table("test-tenant-orders").scan(
+            FilterExpression=Attr("tenant_id").eq(tenant_id)
+        )
+        return [_normalize_received_order(o) for o in to_native(resp.get("Items", []))]
 
     def get_order(self, tenant_id: str, order_id: str) -> dict | None:
         if SKILL_MODE == "stub":
@@ -275,25 +302,16 @@ class DynamoClient:
             data = json.loads((_FIXTURES / "orders.json").read_text())
             data += _stub_orders
             return next((d for d in data if d["order_id"] == order_id), None)
+        # Detail from the PO Receiving domain — the canonical PO (line items, supplier,
+        # award) travels embedded in the row's `purchase_order` payload.
         item = (
-            _live_table("orders")
+            _live_table("test-tenant-orders")
             .get_item(Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"})
             .get("Item")
         )
         if not item:
             return None
-        order = _normalize_order(to_native(item))
-        # The PO row stores only `item_ids`; surface the ordered line items (names,
-        # quantities, prices) from the originating requisition for the detail view.
-        if not order["line_items"] and order.get("requisition_id"):
-            req = (
-                _live_table("requisitions")
-                .get_item(Key={"pk": f"{tenant_id}#{order['requisition_id']}", "sk": "metadata"})
-                .get("Item")
-            )
-            if req:
-                order["line_items"] = to_native(req).get("items", [])
-        return order
+        return _normalize_received_order(to_native(item))
 
 
 dynamo_client = DynamoClient()
