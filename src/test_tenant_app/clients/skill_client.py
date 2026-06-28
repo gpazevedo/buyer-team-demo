@@ -15,12 +15,15 @@ from pathlib import Path
 import boto3
 from opentelemetry import propagate, trace
 
+from test_tenant_app.clients.ddb import table
+
 _tracer = trace.get_tracer("buyer-team.app.skill-client")
 
 SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _REGION = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
-_RUNTIME_NAME = f"{os.getenv('ENV', 'dev')}_skill_runtime"
+_ENV = os.getenv("ENV", "dev")
+_SKILL_LOGICAL = "test_tenant"
 _MCP_PROTOCOL_VERSION = "2024-11-05"
 
 
@@ -39,11 +42,40 @@ def _runtime_client():
 
 
 @cache
+def _resolve_skill_runtime_name() -> str:
+    """Resolve the skill runtime name via the registry config group.
+
+    Precedence:
+      1. ``SKILL_RUNTIME_NAME`` env override.
+      2. ``{ENV}-system-config`` registry → skills.test_tenant.runtime →
+         mcp_servers.<runtime>.runtime_name.
+      3. Hardcoded fallback ``{ENV}_skill_runtime``.
+    """
+    env_override = os.environ.get("SKILL_RUNTIME_NAME")
+    if env_override:
+        return env_override
+
+    try:
+        cfg_table = table("system-config")
+        resp = cfg_table.get_item(Key={"config_group": "registry", "config_key": "default"})
+        item = resp.get("Item")
+        if item:
+            registry = json.loads(item["config_json"])
+            mcp_logical = registry["skills"][_SKILL_LOGICAL]["runtime"]
+            return registry["mcp_servers"][mcp_logical]["runtime_name"]
+    except Exception:
+        pass
+
+    return f"{_ENV}_skill_runtime"
+
+
+@cache
 def _skill_runtime_arn() -> str:
+    name = _resolve_skill_runtime_name()
     for r in _control_client().list_agent_runtimes().get("agentRuntimes", []):
-        if r["agentRuntimeName"] == _RUNTIME_NAME:
+        if r["agentRuntimeName"] == name:
             return r["agentRuntimeArn"]
-    raise RuntimeError(f"Skill runtime {_RUNTIME_NAME!r} not found")
+    raise RuntimeError(f"Skill runtime {name!r} not found")
 
 
 def _invoke_skill_tool(tool_name: str, arguments: dict) -> dict:
