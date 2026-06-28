@@ -205,5 +205,6 @@ def test_quality_gate_blocks_then_app_approves(sfn, state_machine_arn):
     orders = client.get("/api/orders").json()
     pos = [PurchaseOrder(**o) for o in orders if o["requisition_id"] == rid]
     assert len(pos) == 1
-    assert pos[0].status == "ISSUED"
+    # PO Inbox shows the delivered PO from the PRD-013 receiving domain (terminal RECEIVED).
+    assert pos[0].status == "RECEIVED"
     assert pos[0].total_value > 0
