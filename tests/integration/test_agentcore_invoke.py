@@ -51,6 +51,18 @@ def _a2a_message(text: str) -> bytes:
     ).encode()
 
 
+def _result_artifact_text(body: str) -> str:
+    """The final result artifact's text from an A2A task response.
+
+    The agents stream `tool_step_N` status artifacts ahead of the result (serve.py),
+    so the result is not necessarily `artifacts[0]`. The final result is the single
+    artifact whose name is not a `tool_step_*` status update.
+    """
+    artifacts = json.loads(body)["result"]["artifacts"]
+    result = next(a for a in artifacts if not a["name"].startswith("tool_step"))
+    return result["parts"][0]["text"]
+
+
 def test_kraljic_classifier_invoke_classifies(agentcore, agentcore_control):
     """Real LLM-backed A2A invoke: a high/high category classifies STRATEGIC
     and returns the full KraljicClassificationResponse schema (genuine
@@ -237,7 +249,7 @@ def test_leverage_auction_invoke_runs_auction(agentcore, agentcore_control, tabl
         # back as final bids with real prices (the model derives them per round). Rank
         # is left unasserted — the small-tier structured_output coercion doesn't reliably
         # re-emit per-bid rank, but bid identity + pricing prove genuine tool use.
-        result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+        result = json.loads(_result_artifact_text(body))
         assert result["final_bids"], "expected final bids from the seeded suppliers"
         seeded_ids = {s for s, _, _ in suppliers}
         returned_ids = {b["supplier_id"] for b in result["final_bids"]}
@@ -301,7 +313,7 @@ def test_strategic_partnership_invoke_runs_negotiation(agentcore, agentcore_cont
     assert "communication_log" in body
     # The negotiation actually ran: the agent recommends one of the candidate suppliers
     # (prerequisite guards force TCO/risk/history before the recommendation).
-    result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+    result = json.loads(_result_artifact_text(body))
     assert result["recommended_supplier_id"] in candidate_ids
     assert result["tco_analysis"], "expected a TCO analysis per candidate"
 
@@ -359,7 +371,7 @@ def test_bottleneck_negotiation_invoke_runs_negotiation(agentcore, agentcore_con
     assert "communication_log" in body
     # The negotiation actually ran: the agent recommends one of the candidate suppliers
     # (prerequisite guards force TCO/risk before the recommendation).
-    result = json.loads(json.loads(body)["result"]["artifacts"][0]["parts"][0]["text"])
+    result = json.loads(_result_artifact_text(body))
     assert result["recommended_supplier_id"] in candidate_ids
     assert result["tco_analysis"], "expected a TCO analysis per candidate"
     # §2.4-specific output: a backup supplier for concentration-risk mitigation —

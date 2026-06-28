@@ -98,7 +98,7 @@ def test_pr_to_po_live(_state_machine_arn):
     exec_arn = _state_machine_arn.replace(":stateMachine:", ":execution:") + f":{name}"
 
     status = None
-    for _ in range(60):  # up to ~5 min; real agents + cold start
+    for _ in range(90):  # up to ~7.5 min; real agents + cold start
         try:
             status = sfn.describe_execution(executionArn=exec_arn)["status"]
         except sfn.exceptions.ExecutionDoesNotExist:
@@ -117,7 +117,8 @@ def test_pr_to_po_live(_state_machine_arn):
     orders = client.get("/api/orders").json()
     pos = [PurchaseOrder(**o) for o in orders if o["requisition_id"] == rid]
     assert len(pos) == 1
-    assert pos[0].status == "ISSUED"
+    # PO Inbox shows the delivered PO from the PRD-013 receiving domain (terminal RECEIVED).
+    assert pos[0].status == "RECEIVED"
     assert pos[0].total_value > 0
 
 
@@ -185,7 +186,7 @@ def test_non_critical_auto_approve(_state_machine_arn, suppress_quality_gate):
     exec_arn = _state_machine_arn.replace(":stateMachine:", ":execution:") + f":{name}"
 
     sfn_status = None
-    for _ in range(60):
+    for _ in range(90):  # up to ~7.5 min; real agents + cold start
         try:
             desc = sfn.describe_execution(executionArn=exec_arn)
             sfn_status = desc["status"]
@@ -217,5 +218,6 @@ def test_non_critical_auto_approve(_state_machine_arn, suppress_quality_gate):
     orders = client.get("/api/orders").json()
     pos = [PurchaseOrder(**o) for o in orders if o["requisition_id"] == rid]
     assert len(pos) == 1
-    assert pos[0].status == "ISSUED"
+    # PO Inbox shows the delivered PO from the PRD-013 receiving domain (terminal RECEIVED).
+    assert pos[0].status == "RECEIVED"
     assert pos[0].total_value > 0

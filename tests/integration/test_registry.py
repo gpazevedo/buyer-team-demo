@@ -137,7 +137,18 @@ def test_catalog_returns_all_manifest_capabilities():
 
     items = asyncio.run(catalog())
     names = {i["name"] for i in items}
-    assert names == {"ingest_purchase_requisitions", "reset", "load_datasets", "validate_datasets"}
+    assert names == {
+        "ingest_purchase_requisitions",
+        "reset",
+        "load_datasets",
+        "validate_datasets",
+        # PRD-013 PO Receiving domain capabilities
+        "receive_purchase_order",
+        "acknowledge_purchase_order",
+        "reject_purchase_order",
+        "get_order_history",
+        "get_order_detail",
+    }
     for i in items:
         assert isinstance(i["name"], str) and len(i["name"]) > 0
         assert isinstance(i["summary"], str) and len(i["summary"]) > 0

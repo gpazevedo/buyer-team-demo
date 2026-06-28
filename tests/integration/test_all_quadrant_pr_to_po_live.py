@@ -211,7 +211,9 @@ def _run_pr_to_po(state_machine_arn: str, item_id: str, quadrant: str) -> None:
     orders = client.get("/api/orders").json()
     pos = [PurchaseOrder(**o) for o in orders if o["requisition_id"] == rid]
     assert pos, f"[{quadrant}] no PO found for requisition {rid}"
-    assert pos[0].status == "ISSUED", f"[{quadrant}] PO status: {pos[0].status}"
+    # /api/orders reads the PO Receiving domain (PRD-013): the PR→PO chain delivers the
+    # issued PO into the inbox, where its terminal status is RECEIVED (reception_status).
+    assert pos[0].status == "RECEIVED", f"[{quadrant}] PO status: {pos[0].status}"
     assert pos[0].total_value > 0, f"[{quadrant}] PO has zero total_value"
 
 
