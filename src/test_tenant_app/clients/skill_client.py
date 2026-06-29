@@ -103,6 +103,7 @@ def _invoke_skill_tool(tool_name: str, arguments: dict) -> dict:
 
         resp = _runtime_client().invoke_agent_runtime(
             agentRuntimeArn=_skill_runtime_arn(),
+            runtimeSessionId=f"skill-keepalive-{_SKILL_LOGICAL}".ljust(33, "0"),
             payload=payload,
             qualifier="DEFAULT",
             contentType="application/json",
