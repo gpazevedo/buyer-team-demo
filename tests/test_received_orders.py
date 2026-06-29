@@ -66,3 +66,98 @@ def test_normalize_received_order_validates_contract():
     assert po.award_id == "a1"
     assert po.line_items[0].name == "Paper"
     assert po.line_items[0].total == 85.0
+
+
+def test_normalize_received_order_surfaces_acknowledged_at():
+    norm = _normalize_received_order(_row())
+    assert norm["acknowledged_at"] == "2026-06-27T12:00:00+00:00"
+
+
+def test_normalize_received_order_surfaces_trace():
+    norm = _normalize_received_order(_row())
+    assert norm["trace"] == {
+        "requisition_id": "r1",
+        "negotiation_ids": ["n1"],
+        "award_id": "a1",
+    }
+
+
+def test_normalize_received_order_without_acknowledged_at():
+    row = _row()
+    del row["acknowledged_at"]
+    norm = _normalize_received_order(row)
+    assert norm["acknowledged_at"] is None
+
+
+def test_normalize_received_order_without_trace():
+    row = _row()
+    del row["trace"]
+    norm = _normalize_received_order(row)
+    assert norm["trace"] is None
+
+
+def _stub_order(**overrides):
+    """Build a stub order dict for ack/reject tests."""
+    return {
+        "order_id": "po-stub-001",
+        "requisition_id": "req-stub-001",
+        "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd",
+        "supplier_id": "sup-001",
+        "supplier_name": "Staples Business",
+        "supplier_contact_email": "procurement@staples.example.com",
+        "status": "RECEIVED",
+        "line_items": [],
+        "total_value": 133.00,
+        "savings_amount": 12.00,
+        "savings_pct": 8.3,
+        "received_at": "2026-06-12T11:00:00Z",
+        "award_id": "award-stub-001",
+        **overrides,
+    }
+
+
+def test_acknowledge_order_stub():
+    from test_tenant_app.clients import master_data_client
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    master_data_client._stub_orders.clear()
+    master_data_client._stub_orders.append(_stub_order())
+
+    result = dynamo_client.acknowledge_order(
+        "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "po-stub-001", notes="received ok"
+    )
+    assert result is not None
+    assert result["status"] == "ACKNOWLEDGED"
+    assert result["acknowledged_at"] is not None
+
+
+def test_reject_order_stub():
+    from test_tenant_app.clients import master_data_client
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    master_data_client._stub_orders.clear()
+    master_data_client._stub_orders.append(_stub_order())
+
+    result = dynamo_client.reject_order(
+        "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "po-stub-001", reason="wrong items"
+    )
+    assert result is not None
+    assert result["status"] == "REJECTED"
+
+
+def test_acknowledge_order_not_found():
+    from test_tenant_app.clients import master_data_client
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    master_data_client._stub_orders.clear()
+    result = dynamo_client.acknowledge_order("nonexistent", "po-none", "")
+    assert result is None
+
+
+def test_reject_order_not_found():
+    from test_tenant_app.clients import master_data_client
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    master_data_client._stub_orders.clear()
+    result = dynamo_client.reject_order("nonexistent", "po-none", "")
+    assert result is None

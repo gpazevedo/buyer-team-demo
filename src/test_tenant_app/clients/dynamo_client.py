@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from functools import cache
 from pathlib import Path
 
@@ -88,6 +89,8 @@ def _normalize_received_order(row: dict) -> dict:
     po = json.loads(raw) if isinstance(raw, str) else (raw or {})
     supplier = po.get("supplier", {})
     award = po.get("award", {})
+    raw_trace = row.get("trace")
+    trace = json.loads(raw_trace) if isinstance(raw_trace, str) else (raw_trace or None)
     return {
         "order_id": row.get("order_id") or po.get("order_id"),
         "requisition_id": row.get("requisition_id") or po.get("requisition_id"),
@@ -103,7 +106,9 @@ def _normalize_received_order(row: dict) -> dict:
         ),
         "savings_pct": float(award.get("savings_pct", 0) or 0),
         "received_at": row.get("received_at"),
+        "acknowledged_at": row.get("acknowledged_at"),
         "award_id": award.get("award_id"),
+        "trace": trace,
     }
 
 
@@ -312,6 +317,44 @@ class DynamoClient:
         if not item:
             return None
         return _normalize_received_order(to_native(item))
+
+    def acknowledge_order(self, tenant_id: str, order_id: str, notes: str = "") -> dict | None:
+        if SKILL_MODE == "stub":
+            from test_tenant_app.clients.master_data_client import _stub_orders
+
+            data = json.loads((_FIXTURES / "orders.json").read_text())
+            data += _stub_orders
+            for o in data:
+                if o["order_id"] == order_id and o["tenant_id"] == tenant_id:
+                    o["status"] = "ACKNOWLEDGED"
+                    o["acknowledged_at"] = datetime.now(timezone.utc).isoformat()
+                    return o
+            return None
+        now = datetime.now(timezone.utc).isoformat()
+        _live_table("test-tenant-orders").update_item(
+            Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"},
+            UpdateExpression="SET reception_status = :s, acknowledged_at = :a",
+            ExpressionAttributeValues={":s": "ACKNOWLEDGED", ":a": now},
+        )
+        return self.get_order(tenant_id, order_id)
+
+    def reject_order(self, tenant_id: str, order_id: str, reason: str = "") -> dict | None:
+        if SKILL_MODE == "stub":
+            from test_tenant_app.clients.master_data_client import _stub_orders
+
+            data = json.loads((_FIXTURES / "orders.json").read_text())
+            data += _stub_orders
+            for o in data:
+                if o["order_id"] == order_id and o["tenant_id"] == tenant_id:
+                    o["status"] = "REJECTED"
+                    return o
+            return None
+        _live_table("test-tenant-orders").update_item(
+            Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"},
+            UpdateExpression="SET reception_status = :s",
+            ExpressionAttributeValues={":s": "REJECTED"},
+        )
+        return self.get_order(tenant_id, order_id)
 
 
 dynamo_client = DynamoClient()

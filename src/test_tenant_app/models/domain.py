@@ -143,4 +143,6 @@ class PurchaseOrder(BaseModel):
     savings_amount: float
     savings_pct: float
     received_at: datetime
+    acknowledged_at: Optional[datetime] = None
     award_id: Optional[str] = None
+    trace: Optional[dict] = None

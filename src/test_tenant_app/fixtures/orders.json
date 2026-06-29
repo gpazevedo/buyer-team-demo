@@ -15,6 +15,7 @@
     "savings_amount": 12.00,
     "savings_pct": 8.3,
     "received_at": "2026-06-12T11:00:00Z",
-    "award_id": "award-stub-001"
+    "award_id": "award-stub-001",
+    "trace": {"requisition_id": "req-stub-001", "negotiation_ids": ["neg-req-stub-1", "neg-req-stub-2"], "award_id": "award-stub-001"}
   }
 ]

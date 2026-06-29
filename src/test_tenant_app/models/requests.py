@@ -23,3 +23,11 @@ class CreateRequisitionRequest(BaseModel):
 
 class LoadDatasetsRequest(BaseModel):
     datasets: list[str]
+
+
+class AckOrderRequest(BaseModel):
+    notes: str = ""
+
+
+class RejectOrderRequest(BaseModel):
+    reason: str
