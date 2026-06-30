@@ -66,6 +66,11 @@ def test_normalize_received_order_validates_contract():
     assert po.award_id == "a1"
     assert po.line_items[0].name == "Paper"
     assert po.line_items[0].total == 85.0
+    # trace coerces into the typed Trace model
+    assert po.trace is not None
+    assert po.trace.requisition_id == "r1"
+    assert po.trace.negotiation_ids == ["n1"]
+    assert po.trace.award_id == "a1"
 
 
 def test_normalize_received_order_surfaces_acknowledged_at():
@@ -94,6 +99,24 @@ def test_normalize_received_order_without_trace():
     del row["trace"]
     norm = _normalize_received_order(row)
     assert norm["trace"] is None
+
+
+def test_normalize_received_order_surfaces_rejection():
+    row = _row()
+    row["reception_status"] = "REJECTED"
+    row["rejected_at"] = "2026-06-27T13:00:00+00:00"
+    row["rejection_reason"] = "damaged on arrival"
+    norm = _normalize_received_order(row)
+    po = PurchaseOrder(**norm)
+    assert po.status == "REJECTED"
+    assert norm["rejected_at"] == "2026-06-27T13:00:00+00:00"
+    assert po.rejection_reason == "damaged on arrival"
+
+
+def test_normalize_received_order_without_rejection():
+    norm = _normalize_received_order(_row())
+    assert norm["rejected_at"] is None
+    assert norm["rejection_reason"] is None
 
 
 def _stub_order(**overrides):
@@ -143,6 +166,7 @@ def test_reject_order_stub():
     )
     assert result is not None
     assert result["status"] == "REJECTED"
+    assert result["rejection_reason"] == "wrong items"
 
 
 def test_acknowledge_order_not_found():

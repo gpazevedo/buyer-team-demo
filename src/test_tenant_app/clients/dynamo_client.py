@@ -107,6 +107,8 @@ def _normalize_received_order(row: dict) -> dict:
         "savings_pct": float(award.get("savings_pct", 0) or 0),
         "received_at": row.get("received_at"),
         "acknowledged_at": row.get("acknowledged_at"),
+        "rejected_at": row.get("rejected_at"),
+        "rejection_reason": row.get("rejection_reason"),
         "award_id": award.get("award_id"),
         "trace": trace,
     }
@@ -347,12 +349,15 @@ class DynamoClient:
             for o in data:
                 if o["order_id"] == order_id and o["tenant_id"] == tenant_id:
                     o["status"] = "REJECTED"
+                    o["rejected_at"] = datetime.now(timezone.utc).isoformat()
+                    o["rejection_reason"] = reason
                     return o
             return None
+        now = datetime.now(timezone.utc).isoformat()
         _live_table("test-tenant-orders").update_item(
             Key={"pk": f"{tenant_id}#{order_id}", "sk": "metadata"},
-            UpdateExpression="SET reception_status = :s",
-            ExpressionAttributeValues={":s": "REJECTED"},
+            UpdateExpression="SET reception_status = :s, rejected_at = :t, rejection_reason = :r",
+            ExpressionAttributeValues={":s": "REJECTED", ":t": now, ":r": reason},
         )
         return self.get_order(tenant_id, order_id)
 

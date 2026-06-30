@@ -8,6 +8,7 @@ from .domain import (
     PurchaseOrder,
     PurchaseRequisition,
     Supplier,
+    Trace,
 )
 from .requests import (
     AckOrderRequest,
@@ -32,4 +33,5 @@ __all__ = [
     "CreateRequisitionRequest",
     "LoadDatasetsRequest",
     "RejectOrderRequest",
+    "Trace",
 ]

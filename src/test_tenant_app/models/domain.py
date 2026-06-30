@@ -130,6 +130,12 @@ class PurchaseRequisition(BaseModel):
     graph_nodes: dict[str, str] = Field(default_factory=dict)
 
 
+class Trace(BaseModel):
+    requisition_id: str
+    negotiation_ids: list[str] = Field(default_factory=list)
+    award_id: Optional[str] = None
+
+
 class PurchaseOrder(BaseModel):
     order_id: str
     requisition_id: str
@@ -144,5 +150,7 @@ class PurchaseOrder(BaseModel):
     savings_pct: float
     received_at: datetime
     acknowledged_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
     award_id: Optional[str] = None
-    trace: Optional[dict] = None
+    trace: Optional[Trace] = None
