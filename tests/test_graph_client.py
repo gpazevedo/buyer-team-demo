@@ -55,6 +55,15 @@ def test_reject_threads_real_approver_and_reason(monkeypatch):
     assert fake.payload["approver"]["user_id"] == "user-xyz"
 
 
+def test_cycle_back_threads_real_approver(monkeypatch):
+    fake = _capture(monkeypatch)
+    approver = {"user_id": "user-cb", "tenant_id": "t-4", "claims": {}}
+    gc.GraphClient().cycle_back_award("t-4", "req-4", approver=approver)
+
+    assert fake.payload["decision"] == "CYCLE_BACK"
+    assert fake.payload["approver"]["user_id"] == "user-cb"
+
+
 def test_missing_approver_falls_back_to_system_identity(monkeypatch):
     """Non-interactive releases (e.g. tenant cancel) carry no human approver."""
     fake = _capture(monkeypatch)

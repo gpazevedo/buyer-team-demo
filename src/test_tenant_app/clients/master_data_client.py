@@ -35,7 +35,13 @@ def _set_pr_age(tenant_id: str, requisition_id: str, seconds: float) -> None:
 
 def _advance_stub_state(pr: dict) -> dict:
     """Simulate time-based state progression for demo polling."""
-    if pr["status"] in ("CANCELLED", "COMPLETED", "FAILED", "PENDING_HUMAN_APPROVAL"):
+    if pr["status"] in (
+        "CANCELLED",
+        "COMPLETED",
+        "FAILED",
+        "PENDING_HUMAN_APPROVAL",
+        "REQUIRES_ATTENTION",
+    ):
         return pr
     elapsed = time.time() - pr.get("_created_ts", time.time())
     if elapsed < 5:
@@ -315,6 +321,28 @@ class MasterDataClient:
         return graph_client.reject_award(
             tenant_id, requisition_id, reason=reason or "Approver rejected", approver=approver
         )
+
+    def cycle_back_pr(
+        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+    ) -> dict:
+        """Approver sends the award back for re-negotiation (HITL CYCLE_BACK). Node 6
+        re-runs the strategy once, then hands off to REQUIRES_ATTENTION when exhausted."""
+        if SKILL_MODE == "stub":
+            pr = _stub_requisitions.get(f"{tenant_id}:{requisition_id}")
+            if pr:
+                if pr.get("_cycle_back_count", 0) >= 1:
+                    pr["status"] = "REQUIRES_ATTENTION"  # exhausted (mirrors Node 6 REQ-G204)
+                else:
+                    pr["_cycle_back_count"] = pr.get("_cycle_back_count", 0) + 1
+                    pr["status"] = "IN_NEGOTIATION"  # re-run; will re-pause on its own
+                    pr["_created_ts"] = time.time() - 15
+                pr.pop("approval_context", None)
+                pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+                return {"status": pr["status"], "requisition_id": requisition_id}
+            return {"status": "REQUIRES_ATTENTION", "requisition_id": requisition_id}
+        from test_tenant_app.clients.graph_client import graph_client
+
+        return graph_client.cycle_back_award(tenant_id, requisition_id, approver=approver)
 
     def cancel_pr(self, tenant_id: str, requisition_id: str) -> dict:
         if SKILL_MODE == "stub":

@@ -104,6 +104,20 @@ def reject_requisition(
     return master_data_client.reject_pr(tenant_id, requisition_id, body.reason, approver)
 
 
+@router.post("/{requisition_id}/cycle_back")
+def cycle_back_requisition(
+    requisition_id: str,
+    approver: Approver = Depends(get_approver),
+):
+    tenant_id = approver["tenant_id"]
+    pr = master_data_client.get_pr(tenant_id, requisition_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    if pr["status"] != "PENDING_HUMAN_APPROVAL":
+        raise HTTPException(status_code=409, detail="PR is not pending approval")
+    return master_data_client.cycle_back_pr(tenant_id, requisition_id, approver)
+
+
 @router.post("/{requisition_id}/cancel")
 def cancel_requisition(
     requisition_id: str,

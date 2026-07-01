@@ -118,6 +118,30 @@ def test_e2e_reject_requires_pending_state():
     assert client.get(f"/api/requisitions/{rid}").json()["status"] == "CANCELLED"
 
 
+def test_e2e_cycle_back_reruns_then_exhausts():
+    rid = _create_pr()
+    _set_pr_age(TENANT, rid, 25)  # PENDING_HUMAN_APPROVAL
+    assert _status(rid) == "PENDING_HUMAN_APPROVAL"
+
+    # First cycle back → re-run (IN_NEGOTIATION), then it re-paused for approval.
+    r = client.post(f"/api/requisitions/{rid}/cycle_back")
+    assert r.status_code == 200
+    assert r.json()["status"] == "IN_NEGOTIATION"
+    _set_pr_age(TENANT, rid, 25)  # drive the re-run back to PENDING
+    assert _status(rid) == "PENDING_HUMAN_APPROVAL"
+
+    # Second cycle back → exhausted → REQUIRES_ATTENTION (terminal).
+    r = client.post(f"/api/requisitions/{rid}/cycle_back")
+    assert r.json()["status"] == "REQUIRES_ATTENTION"
+    assert _status(rid) == "REQUIRES_ATTENTION"
+
+
+def test_e2e_cycle_back_requires_pending_state():
+    rid = _create_pr()
+    _set_pr_age(TENANT, rid, 15)  # IN_NEGOTIATION
+    assert client.post(f"/api/requisitions/{rid}/cycle_back").status_code == 409
+
+
 def test_e2e_cancel_mid_lifecycle():
     rid = _create_pr()
     _set_pr_age(TENANT, rid, 15)  # IN_NEGOTIATION

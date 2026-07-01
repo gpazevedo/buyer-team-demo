@@ -73,6 +73,15 @@ class GraphClient:
             return {"status": "rejected"}
         return self._resume_approval(tenant_id, requisition_id, "REJECTED", reason, approver)
 
+    def cycle_back_award(
+        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+    ) -> dict:
+        """Release a paused Approval Gate with a CYCLE_BACK decision — re-run the
+        strategy once (Node 6), or hand off to REQUIRES_ATTENTION when exhausted."""
+        if SKILL_MODE == "stub":
+            return {"status": "cycled_back"}
+        return self._resume_approval(tenant_id, requisition_id, "CYCLE_BACK", approver=approver)
+
     def _resume_approval(
         self,
         tenant_id: str,
