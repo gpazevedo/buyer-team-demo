@@ -15,6 +15,7 @@ from .requests import (
     CreateRequisitionRequest,
     LoadDatasetsRequest,
     RejectOrderRequest,
+    RejectRequisitionRequest,
 )
 
 __all__ = [
@@ -33,5 +34,6 @@ __all__ = [
     "CreateRequisitionRequest",
     "LoadDatasetsRequest",
     "RejectOrderRequest",
+    "RejectRequisitionRequest",
     "Trace",
 ]

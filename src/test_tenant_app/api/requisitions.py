@@ -10,6 +10,7 @@ from test_tenant_app.models import (
     CreateRequisitionRequest,
     Negotiation,
     PurchaseRequisition,
+    RejectRequisitionRequest,
 )
 
 router = APIRouter(prefix="/api/requisitions", tags=["requisitions"])
@@ -85,6 +86,20 @@ def approve_requisition(
     if pr["status"] != "PENDING_HUMAN_APPROVAL":
         raise HTTPException(status_code=409, detail="PR is not pending approval")
     return master_data_client.approve_pr(tenant_id, requisition_id)
+
+
+@router.post("/{requisition_id}/reject")
+def reject_requisition(
+    requisition_id: str,
+    body: RejectRequisitionRequest,
+    tenant_id: str = Depends(get_tenant_id),
+):
+    pr = master_data_client.get_pr(tenant_id, requisition_id)
+    if not pr:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    if pr["status"] != "PENDING_HUMAN_APPROVAL":
+        raise HTTPException(status_code=409, detail="PR is not pending approval")
+    return master_data_client.reject_pr(tenant_id, requisition_id, body.reason)
 
 
 @router.post("/{requisition_id}/cancel")

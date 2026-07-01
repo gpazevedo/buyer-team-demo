@@ -31,3 +31,9 @@ class AckOrderRequest(BaseModel):
 
 class RejectOrderRequest(BaseModel):
     reason: str
+
+
+class RejectRequisitionRequest(BaseModel):
+    """Approver's rejection of a pending award (HITL REJECTED decision)."""
+
+    reason: str = ""

@@ -269,6 +269,22 @@ class MasterDataClient:
 
         return graph_client.approve_award(tenant_id, requisition_id)
 
+    def reject_pr(self, tenant_id: str, requisition_id: str, reason: str = "") -> dict:
+        """Approver rejects the pending award (HITL REJECTED). Node 6's REJECTED
+        path cancels the negotiation + requisition, so the API must not pre-empt it."""
+        if SKILL_MODE == "stub":
+            key = f"{tenant_id}:{requisition_id}"
+            pr = _stub_requisitions.get(key)
+            if pr:
+                pr["status"] = "CANCELLED"
+                pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
+            return {"status": "CANCELLED", "requisition_id": requisition_id}
+        from test_tenant_app.clients.graph_client import graph_client
+
+        return graph_client.reject_award(
+            tenant_id, requisition_id, reason=reason or "Approver rejected"
+        )
+
     def cancel_pr(self, tenant_id: str, requisition_id: str) -> dict:
         if SKILL_MODE == "stub":
             key = f"{tenant_id}:{requisition_id}"

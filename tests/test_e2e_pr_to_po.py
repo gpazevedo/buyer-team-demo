@@ -95,6 +95,18 @@ def test_e2e_approve_requires_pending_state():
     assert body["graph_nodes"]["award"] == "completed"
 
 
+def test_e2e_reject_requires_pending_state():
+    rid = _create_pr()
+    _set_pr_age(TENANT, rid, 15)  # IN_NEGOTIATION
+    assert client.post(f"/api/requisitions/{rid}/reject", json={"reason": "x"}).status_code == 409
+
+    _set_pr_age(TENANT, rid, 25)  # PENDING_HUMAN_APPROVAL
+    r = client.post(f"/api/requisitions/{rid}/reject", json={"reason": "too expensive"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "CANCELLED"
+    assert client.get(f"/api/requisitions/{rid}").json()["status"] == "CANCELLED"
+
+
 def test_e2e_cancel_mid_lifecycle():
     rid = _create_pr()
     _set_pr_age(TENANT, rid, 15)  # IN_NEGOTIATION
