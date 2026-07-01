@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from test_tenant_app.auth.jwt import get_tenant_id
+from test_tenant_app.auth.jwt import Approver, get_approver, get_tenant_id
 from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.master_data_client import master_data_client
 from test_tenant_app.clients.skill_client import skill_client
@@ -78,28 +78,30 @@ def get_awards(requisition_id: str, tenant_id: str = Depends(get_tenant_id)):
 @router.post("/{requisition_id}/approve")
 def approve_requisition(
     requisition_id: str,
-    tenant_id: str = Depends(get_tenant_id),
+    approver: Approver = Depends(get_approver),
 ):
+    tenant_id = approver["tenant_id"]
     pr = master_data_client.get_pr(tenant_id, requisition_id)
     if not pr:
         raise HTTPException(status_code=404, detail="Requisition not found")
     if pr["status"] != "PENDING_HUMAN_APPROVAL":
         raise HTTPException(status_code=409, detail="PR is not pending approval")
-    return master_data_client.approve_pr(tenant_id, requisition_id)
+    return master_data_client.approve_pr(tenant_id, requisition_id, approver)
 
 
 @router.post("/{requisition_id}/reject")
 def reject_requisition(
     requisition_id: str,
     body: RejectRequisitionRequest,
-    tenant_id: str = Depends(get_tenant_id),
+    approver: Approver = Depends(get_approver),
 ):
+    tenant_id = approver["tenant_id"]
     pr = master_data_client.get_pr(tenant_id, requisition_id)
     if not pr:
         raise HTTPException(status_code=404, detail="Requisition not found")
     if pr["status"] != "PENDING_HUMAN_APPROVAL":
         raise HTTPException(status_code=409, detail="PR is not pending approval")
-    return master_data_client.reject_pr(tenant_id, requisition_id, body.reason)
+    return master_data_client.reject_pr(tenant_id, requisition_id, body.reason, approver)
 
 
 @router.post("/{requisition_id}/cancel")

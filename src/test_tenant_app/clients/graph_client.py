@@ -40,8 +40,15 @@ def _negotiation_id(tenant_id: str, requisition_id: str) -> str:
     return str(uuid5(NAMESPACE_DNS, f"{tenant_id}:negotiation:{requisition_id}"))
 
 
+# Fallback approver for non-interactive releases (e.g. tenant-initiated cancel)
+# where no authenticated human is on the request.
+_SYSTEM_APPROVER = {"user_id": "test-tenant-app", "claims": {}}
+
+
 class GraphClient:
-    def approve_award(self, tenant_id: str, requisition_id: str) -> dict:
+    def approve_award(
+        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+    ) -> dict:
         """Release a paused Approval Gate with an APPROVED decision so Node 7 runs.
 
         Node 6 paused on `waitForTaskToken`; the approval only completes the
@@ -51,24 +58,38 @@ class GraphClient:
         """
         if SKILL_MODE == "stub":
             return {"status": "approved"}
-        return self._resume_approval(tenant_id, requisition_id, "APPROVED")
+        return self._resume_approval(tenant_id, requisition_id, "APPROVED", approver=approver)
 
-    def reject_award(self, tenant_id: str, requisition_id: str, reason: str | None = None) -> dict:
+    def reject_award(
+        self,
+        tenant_id: str,
+        requisition_id: str,
+        reason: str | None = None,
+        approver: dict | None = None,
+    ) -> dict:
         """Release a paused Approval Gate with a REJECTED decision (cancels the
         negotiation + requisition). A no-op if nothing is paused."""
         if SKILL_MODE == "stub":
             return {"status": "rejected"}
-        return self._resume_approval(tenant_id, requisition_id, "REJECTED", reason)
+        return self._resume_approval(tenant_id, requisition_id, "REJECTED", reason, approver)
 
     def _resume_approval(
-        self, tenant_id: str, requisition_id: str, decision: str, reason: str | None = None
+        self,
+        tenant_id: str,
+        requisition_id: str,
+        decision: str,
+        reason: str | None = None,
+        approver: dict | None = None,
     ) -> dict:
         negotiation_id = _negotiation_id(tenant_id, requisition_id)
+        # Node 6's claims gate reads approver.tenant_id + approver.claims; carry the
+        # request's tenant so the effective-claims check runs against a real identity.
+        approver_payload = {**_SYSTEM_APPROVER, **(approver or {}), "tenant_id": tenant_id}
         payload = {
             "decision": decision,
             "tenant_id": tenant_id,
             "negotiation_id": negotiation_id,
-            "approver": {"user_id": "test-tenant-app"},
+            "approver": approver_payload,
         }
         if reason:
             payload["reason"] = reason

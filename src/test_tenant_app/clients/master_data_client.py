@@ -253,7 +253,7 @@ class MasterDataClient:
         pr["graph_nodes"] = _synthesize_graph_nodes(tenant_id, pr)
         return pr
 
-    def approve_pr(self, tenant_id: str, requisition_id: str) -> dict:
+    def approve_pr(self, tenant_id: str, requisition_id: str, approver: dict | None = None) -> dict:
         if SKILL_MODE == "stub":
             key = f"{tenant_id}:{requisition_id}"
             pr = _stub_requisitions.get(key)
@@ -267,9 +267,11 @@ class MasterDataClient:
         # sets the requisition COMPLETED — the API must not pre-empt that here.
         from test_tenant_app.clients.graph_client import graph_client
 
-        return graph_client.approve_award(tenant_id, requisition_id)
+        return graph_client.approve_award(tenant_id, requisition_id, approver=approver)
 
-    def reject_pr(self, tenant_id: str, requisition_id: str, reason: str = "") -> dict:
+    def reject_pr(
+        self, tenant_id: str, requisition_id: str, reason: str = "", approver: dict | None = None
+    ) -> dict:
         """Approver rejects the pending award (HITL REJECTED). Node 6's REJECTED
         path cancels the negotiation + requisition, so the API must not pre-empt it."""
         if SKILL_MODE == "stub":
@@ -282,7 +284,7 @@ class MasterDataClient:
         from test_tenant_app.clients.graph_client import graph_client
 
         return graph_client.reject_award(
-            tenant_id, requisition_id, reason=reason or "Approver rejected"
+            tenant_id, requisition_id, reason=reason or "Approver rejected", approver=approver
         )
 
     def cancel_pr(self, tenant_id: str, requisition_id: str) -> dict:
