@@ -115,6 +115,15 @@ class LineItem(BaseModel):
     total: float
 
 
+class ApprovalContext(BaseModel):
+    """Why a PR is paused for human approval (Node 6 block reason + award context)."""
+
+    block_reason: Optional[str] = None
+    quadrant: Optional[str] = None
+    quality_score: Optional[float] = None
+    awarded_price: Optional[float] = None
+
+
 class PurchaseRequisition(BaseModel):
     requisition_id: str
     tenant_id: str
@@ -128,6 +137,7 @@ class PurchaseRequisition(BaseModel):
     created_at: datetime
     updated_at: datetime
     graph_nodes: dict[str, str] = Field(default_factory=dict)
+    approval_context: Optional[ApprovalContext] = None
 
 
 class Trace(BaseModel):

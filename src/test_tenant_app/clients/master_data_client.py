@@ -59,6 +59,13 @@ def _advance_stub_state(pr: dict) -> dict:
             "bid_evaluation": "completed",
             "award": "pending",
         }
+        # Demo "why paused" context (Node 6 persists these live; here they're synthesized).
+        pr["approval_context"] = {
+            "block_reason": "quadrant_strategic",
+            "quadrant": "STRATEGIC",
+            "quality_score": 0.83,
+            "awarded_price": 132.50,
+        }
     pr["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
     return pr
 
@@ -166,6 +173,26 @@ def _synthesize_graph_nodes(tenant_id: str, pr: dict) -> dict:
     return nodes
 
 
+def _approval_context(tenant_id: str, pr: dict) -> dict | None:
+    """Surface *why* the PR is paused for human approval (PRD-002 §3.6).
+
+    Node 6 persists `approval_block_reason`/`approval_quality_score` on the negotiation
+    row; `kraljic_quadrant`/`awarded_price` already live there. Fold them into the read
+    model so the approver reviews with the block reason + award context in hand."""
+    from test_tenant_app.clients.dynamo_client import dynamo_client
+
+    negs = dynamo_client.get_negotiations(tenant_id, pr["requisition_id"])
+    if not negs:
+        return None
+    neg = negs[0]
+    return {
+        "block_reason": neg.get("approval_block_reason"),
+        "quadrant": neg.get("kraljic_quadrant"),
+        "quality_score": neg.get("approval_quality_score"),
+        "awarded_price": neg.get("awarded_price"),
+    }
+
+
 class MasterDataClient:
     def create_pr(
         self,
@@ -251,6 +278,8 @@ class MasterDataClient:
         # Normalize at the read boundary (same seam as the other live-mode field gaps).
         pr.setdefault("updated_at", pr.get("created_at"))
         pr["graph_nodes"] = _synthesize_graph_nodes(tenant_id, pr)
+        if pr.get("status") == "PENDING_HUMAN_APPROVAL":
+            pr["approval_context"] = _approval_context(tenant_id, pr)
         return pr
 
     def approve_pr(self, tenant_id: str, requisition_id: str, approver: dict | None = None) -> dict:

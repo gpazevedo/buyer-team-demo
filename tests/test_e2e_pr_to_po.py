@@ -95,6 +95,17 @@ def test_e2e_approve_requires_pending_state():
     assert body["graph_nodes"]["award"] == "completed"
 
 
+def test_e2e_pending_pr_carries_approval_context():
+    rid = _create_pr()
+    _set_pr_age(TENANT, rid, 25)  # PENDING_HUMAN_APPROVAL
+    body = client.get(f"/api/requisitions/{rid}").json()
+    assert body["status"] == "PENDING_HUMAN_APPROVAL"
+    ctx = body["approval_context"]
+    assert ctx["block_reason"] == "quadrant_strategic"
+    assert ctx["quadrant"] == "STRATEGIC"
+    assert ctx["quality_score"] == 0.83
+
+
 def test_e2e_reject_requires_pending_state():
     rid = _create_pr()
     _set_pr_age(TENANT, rid, 15)  # IN_NEGOTIATION
