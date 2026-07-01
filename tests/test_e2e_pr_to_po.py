@@ -95,6 +95,22 @@ def test_e2e_approve_requires_pending_state():
     assert body["graph_nodes"]["award"] == "completed"
 
 
+def test_e2e_list_requisitions_filters_by_status():
+    pending = _create_pr()
+    _set_pr_age(TENANT, pending, 25)  # PENDING_HUMAN_APPROVAL
+    negotiating = _create_pr()
+    _set_pr_age(TENANT, negotiating, 15)  # IN_NEGOTIATION
+
+    inbox = client.get("/api/requisitions?status=PENDING_HUMAN_APPROVAL").json()
+    ids = {pr["requisition_id"] for pr in inbox}
+    assert pending in ids
+    assert negotiating not in ids
+    assert all(pr["status"] == "PENDING_HUMAN_APPROVAL" for pr in inbox)
+    # The inbox row carries the "why paused" context for the approver.
+    row = next(pr for pr in inbox if pr["requisition_id"] == pending)
+    assert row["approval_context"]["block_reason"] == "quadrant_strategic"
+
+
 def test_e2e_pending_pr_carries_approval_context():
     rid = _create_pr()
     _set_pr_age(TENANT, rid, 25)  # PENDING_HUMAN_APPROVAL

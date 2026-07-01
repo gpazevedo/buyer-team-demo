@@ -288,6 +288,38 @@ class MasterDataClient:
             pr["approval_context"] = _approval_context(tenant_id, pr)
         return pr
 
+    def list_prs(self, tenant_id: str, status: str | None = None) -> list[dict]:
+        """List a tenant's requisitions, optionally filtered by status (the approval
+        inbox passes PENDING_HUMAN_APPROVAL). Matching rows carry graph_nodes +
+        approval_context, same as get_pr, so the inbox can show *why* each is paused."""
+        if SKILL_MODE == "stub":
+            out = []
+            for key, pr in _stub_requisitions.items():
+                if not key.startswith(f"{tenant_id}:"):
+                    continue
+                pr = _advance_stub_state(pr)
+                if status and pr["status"] != status:
+                    continue
+                out.append(pr)
+            return out
+        from boto3.dynamodb.conditions import Attr
+
+        from test_tenant_app.clients.ddb import table, to_native
+
+        resp = table("requisitions").scan(
+            FilterExpression=Attr("pk").begins_with(f"{tenant_id}#") & Attr("sk").eq("metadata")
+        )
+        out = []
+        for pr in to_native(resp.get("Items", [])):
+            if status and pr.get("status") != status:
+                continue
+            pr.setdefault("updated_at", pr.get("created_at"))
+            pr["graph_nodes"] = _synthesize_graph_nodes(tenant_id, pr)
+            if pr.get("status") == "PENDING_HUMAN_APPROVAL":
+                pr["approval_context"] = _approval_context(tenant_id, pr)
+            out.append(pr)
+        return out
+
     def approve_pr(self, tenant_id: str, requisition_id: str, approver: dict | None = None) -> dict:
         if SKILL_MODE == "stub":
             key = f"{tenant_id}:{requisition_id}"

@@ -49,6 +49,16 @@ def create_requisition(
     return PurchaseRequisition(**pr)
 
 
+@router.get("", response_model=list[PurchaseRequisition])
+def list_requisitions(
+    status: str | None = Query(default=None),
+    tenant_id: str = Depends(get_tenant_id),
+):
+    """List requisitions, optionally filtered by status (the approval inbox passes
+    `status=PENDING_HUMAN_APPROVAL`)."""
+    return [PurchaseRequisition(**pr) for pr in master_data_client.list_prs(tenant_id, status)]
+
+
 @router.get("/{requisition_id}", response_model=PurchaseRequisition)
 def get_requisition(requisition_id: str, tenant_id: str = Depends(get_tenant_id)):
     pr = master_data_client.get_pr(tenant_id, requisition_id)
