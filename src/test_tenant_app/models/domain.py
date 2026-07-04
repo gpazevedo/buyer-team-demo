@@ -82,6 +82,22 @@ class Negotiation(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+class CommunicationEntry(BaseModel):
+    """One simulated RFQ/award/rejection send, from `{env}-communications`.
+
+    There is no real supplier system in this demo — invitations are logged by the
+    strategy agent when it seeds a bid round, and award/rejection notices are logged
+    by `award_comms` right before PO assembly. This model surfaces that log as a
+    timeline, not a live message.
+    """
+
+    communication_id: str
+    type: str
+    supplier_id: str
+    supplier_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
 class Bid(BaseModel):
     bid_id: str
     requisition_id: str
@@ -93,6 +109,13 @@ class Bid(BaseModel):
     lead_time_days: Optional[int] = None
     submitted_at: Optional[datetime] = None
     is_best_bid: bool = False
+
+
+class NegotiationDetail(Negotiation):
+    """Negotiation plus its bids and communications timeline, for the detail view."""
+
+    bids: list[Bid] = Field(default_factory=list)
+    communications: list[CommunicationEntry] = Field(default_factory=list)
 
 
 class Award(BaseModel):

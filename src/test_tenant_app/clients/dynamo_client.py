@@ -216,6 +216,105 @@ class DynamoClient:
         names = _supplier_name_map(tenant_id)
         return [_normalize_negotiation(n, names) for n in to_native(resp.get("Items", []))]
 
+    def get_negotiation(self, tenant_id: str, negotiation_id: str) -> dict | None:
+        if SKILL_MODE == "stub":
+            return {
+                "negotiation_id": negotiation_id,
+                "requisition_id": f"req-{negotiation_id[:8]}",
+                "tenant_id": tenant_id,
+                "supplier_id": "supplier-001",
+                "supplier_name": "Office Pro Supplies",
+                "status": "COMPLETED",
+                "started_at": None,
+                "completed_at": None,
+            }
+        # Negotiations key directly on (tenant_id, negotiation_id) — no requisition needed.
+        item = (
+            _live_table("negotiations")
+            .get_item(Key={"tenant_id": tenant_id, "negotiation_id": negotiation_id})
+            .get("Item")
+        )
+        if not item:
+            return None
+        names = _supplier_name_map(tenant_id)
+        return _normalize_negotiation(to_native(item), names)
+
+    def get_bids_for_negotiation(
+        self, tenant_id: str, negotiation_id: str, requisition_id: str
+    ) -> list[dict]:
+        if SKILL_MODE == "stub":
+            return [
+                {
+                    "bid_id": f"bid-{negotiation_id[:8]}-1",
+                    "requisition_id": requisition_id,
+                    "negotiation_id": negotiation_id,
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "total_amount": 132.50,
+                    "currency": "USD",
+                    "lead_time_days": 5,
+                    "submitted_at": None,
+                    "is_best_bid": True,
+                },
+            ]
+        resp = _live_table("bids").query(KeyConditionExpression=Key("tenant_id").eq(tenant_id))
+        names = _supplier_name_map(tenant_id)
+        return [
+            _normalize_bid(b, requisition_id, names)
+            for b in to_native(resp.get("Items", []))
+            if b.get("negotiation_id") == negotiation_id
+        ]
+
+    def get_communications(self, tenant_id: str, negotiation_id: str) -> list[dict]:
+        """Timeline of simulated RFQ/award/rejection sends for one negotiation.
+
+        Two idempotency-key schemes coexist in `{env}-communications`: the RFQ-round
+        agents (spot_bidding, leverage_auction) key `pk=negotiation_id`; `award_comms`
+        keys `pk=f"{tenant_id}#{negotiation_id}"`. Query both and merge.
+        """
+        if SKILL_MODE == "stub":
+            return [
+                {
+                    "communication_id": "c1",
+                    "type": "BID_INVITATION",
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "created_at": None,
+                },
+                {
+                    "communication_id": "c2",
+                    "type": "AWARD_NOTIFICATION",
+                    "supplier_id": "supplier-001",
+                    "supplier_name": "Office Pro Supplies",
+                    "created_at": None,
+                },
+                {
+                    "communication_id": "c3",
+                    "type": "REJECTION_NOTIFICATION",
+                    "supplier_id": "supplier-002",
+                    "supplier_name": "Global Office Solutions",
+                    "created_at": None,
+                },
+            ]
+        table = _live_table("communications")
+        rows = table.query(KeyConditionExpression=Key("pk").eq(negotiation_id)).get("Items", [])
+        rows += table.query(
+            KeyConditionExpression=Key("pk").eq(f"{tenant_id}#{negotiation_id}")
+        ).get("Items", [])
+        names = _supplier_name_map(tenant_id)
+        entries = [
+            {
+                "communication_id": r.get("communication_id", r.get("sk", "")),
+                "type": r.get("type", ""),
+                "supplier_id": r.get("supplier_id", ""),
+                "supplier_name": r.get("supplier_name") or names.get(r.get("supplier_id")),
+                "created_at": r.get("created_at"),
+            }
+            for r in to_native(rows)
+        ]
+        entries.sort(key=lambda c: c["created_at"] or "")
+        return entries
+
     def get_bids(self, tenant_id: str, requisition_id: str) -> list[dict]:
         if SKILL_MODE == "stub":
             return [
