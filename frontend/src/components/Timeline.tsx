@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
 import ApprovalControls from "./ApprovalControls";
 
@@ -96,7 +96,22 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
     return () => {
       console.log("[Timeline] closing SSE", negotiationId);
       es.close();
+      clearInterval(pollRef.current);
     };
+  }, [negotiationId]);
+
+  // Polling fallback: refresh state every 3s so the UI stays in sync even
+  // if SSE events are missed (the SSE stream has no guaranteed delivery).
+  const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  useEffect(() => {
+    if (!negotiationId) return;
+    pollRef.current = setInterval(() => {
+      fetch(`/demo/negotiations/${negotiationId}`)
+        .then((r) => r.json())
+        .then(setState)
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(pollRef.current);
   }, [negotiationId]);
 
   if (!negotiationId) {
@@ -224,15 +239,18 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
 
 function ProgressBar({ status }: { status: string | null }) {
   const steps = [
-    { key: "ACTIVE", label: "Ingest" },
-    { key: "NEGOTIATING", label: "Strategy" },
+    { key: "PENDING", label: "Ingest" },
+    { key: "IN_PROGRESS", label: "Strategy" },
     { key: "EVALUATING", label: "Evaluate" },
     { key: "PENDING_APPROVAL", label: "Approval" },
-    { key: "AWARDED", label: "Award" },
+    { key: "APPROVED", label: "Award" },
     { key: "COMPLETED", label: "PO Issued" },
   ];
 
-  const statusOrder = ["ACTIVE", "NEGOTIATING", "EVALUATING", "PENDING_APPROVAL", "APPROVED", "AWARDED", "COMPLETED"];
+  // Backend normalizes orchestrator statuses (dynamo_client.py _NEG_STATUS):
+  //   ACTIVE/NEGOTIATING → IN_PROGRESS, AWARDED → COMPLETED
+  // Other statuses (EVALUATING, PENDING_APPROVAL, APPROVED) pass through.
+  const statusOrder = ["PENDING", "IN_PROGRESS", "EVALUATING", "PENDING_APPROVAL", "APPROVED", "COMPLETED"];
   const currentIdx = status ? statusOrder.indexOf(status) : 0;
 
   return (

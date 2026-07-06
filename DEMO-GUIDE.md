@@ -65,7 +65,7 @@ Four Kraljic quadrants are available, each driving a different orchestrator path
 | Quadrant | Part | Strategy | What to watch |
 |----------|------|----------|---------------|
 | Non-Critical | Lavatory consumable kit ($180) | SPOT_BID | Auto-approves. Completes in ~30s. No approval panel appears. |
-| Leverage | Main wheel tire ($2,400) | COMPETITIVE_AUCTION | HITL only if awarded price >$10k (set qty ≥5). See competing bids from AeroStock, SkyParts, GlobalWheel. |
+| Leverage | Main wheel tire ($2,400) | COMPETITIVE_AUCTION | HITL only if awarded price >$5k (set qty ≥3). See competing bids from AeroStock, SkyParts, GlobalWheel. |
 | Bottleneck | VHF COMM transceiver ($11,800) | PARTNERSHIP_RISK | Always pauses for HITL approval. Block reason reads "STRATEGIC_APPROVAL_REQUIRED". |
 | Strategic | HPT stage-1 blade set ($96,000) | PARTNERSHIP_VALUE | Always pauses for HITL. Highest value — best savings story. |
 
@@ -108,12 +108,17 @@ Approximate duration per quadrant (with VPC/NAT up for LLM agents):
 | Quadrant | Time to PENDING_APPROVAL | Time to COMPLETED (if approved fast) |
 |----------|-------------------------|--------------------------------------|
 | NON_CRITICAL | ~15s | ~30s (auto, no approval pause) |
-| LEVERAGE | ~30s | ~45s (+decision time if over $10k) |
+| LEVERAGE | ~30s | ~45s (+decision time if over $5k) |
 | BOTTLENECK | ~60s | ~75s (+decision time) |
 | STRATEGIC | ~90s | ~105s (+decision time) |
 
 Without VPC (NAT down — resilience fallback pricing), all quadrants complete within
 these bounds; bids show `source: <strategy>_fallback_stub` instead of `agent_priced`.
+
+**Performance note:** Node 5 (bid evaluation) and Node 7 (award communications) use
+inline deterministic logic — no A2A agent overhead. Each completes in ~1-2s instead
+of the 25-60s the LLM agents previously added. The per-quadrant times above reflect
+this improvement.
 
 ### 3. Approve (or reject) a negotiation
 
@@ -168,7 +173,7 @@ storage resolution) reading the `procurement/business` namespace (emitted by
 | **Approvals (by status, stacked)** | Every HITL decision registers here — APPROVED, REJECTED, CYCLE_BACK. |
 | **Approval Wait Time (avg / p90)** | How long the negotiation sat in PENDING_APPROVAL before someone clicked Approve. |
 | **Negotiation Savings — Amount / Pct** | Dollar savings and percentage calculated against estimated unit price vs awarded amount. Best demo story: STRATEGIC HPT blade — $96k est. vs ~$88k awarded = ~8% savings. |
-| **Token Usage — Input / Output (by agent + model tier)** | LLM token consumption across all 7 agents during this negotiation. Spikes visibly when the strategy/negotiation agents run. |
+| **Token Usage — Input / Output (by agent + model tier)** | LLM token consumption across all 6 agents during this negotiation. Spikes visibly when the strategy/negotiation agents run. |
 | **Kraljic Classification Source (by source, stacked)** | Shows how each PR was classified — `agent` (LLM-driven), `semantic_cache` (cache hit), `rule_based_fallback` (resilience path). |
 
 **Live demo script for the dashboard:**
@@ -200,9 +205,11 @@ node.ingest_validate → node.kraljic_classify → node.strategy_execute
   → node.bid_evaluation → node.approval_gate → node.award_comms
 ```
 
-Within each node, the `agentcore.invoke` span shows the A2A call to the LLM agent
-runtime, and the ADOT Lambda auto-instrumentation captures DynamoDB reads/writes
-and other SDK calls.
+Nodes 1-4 that invoke A2A agents (ingest, classify, strategy-execute, approval-gate)
+show an `agentcore.invoke` sub-span for the LLM call. Nodes 5 and 7 (bid-evaluation,
+award-comms) use inline deterministic logic — they complete in ~1-2s with only the
+node span and ADOT-instrumented DynamoDB reads/writes. The ADOT Lambda
+auto-instrumentation captures SDK calls across all 6 nodes.
 
 **To find a trace:**
 
@@ -237,7 +244,7 @@ fields @timestamp, @message
 
 ### 4. Agent Runtime Alarms
 
-14 CloudWatch alarms cover the 7 AgentCore agent runtimes + 6 orchestrator node
+12 CloudWatch alarms cover the 6 AgentCore agent runtimes + 6 orchestrator node
 Lambdas + the Step Functions state machine:
 
 - `dev-buyer-team-{agent-name}-agent-errors` — fires on any AgentCore runtime error
@@ -259,8 +266,8 @@ negotiation's timeline updates independently.
 1. **NON_CRITICAL** — "The simplest path: a low-value, low-risk item. Auto-classified,
    auto-approved, PO issued in ~30 seconds. No human needed."
 2. **LEVERAGE (qty=1)** — "Multiple suppliers compete. No HITL needed because the
-   awarded price stays under the $10k gate."
-3. **LEVERAGE (qty=5, ~$12k)** — "Same item, higher quantity — now over the $10k
+   awarded price stays under the $5k gate."
+3. **LEVERAGE (qty=3, ~$7.2k)** — "Same item, higher quantity — now over the $5k
    threshold. The governance gate pauses for approval."
 4. **BOTTLENECK** — "A sole-source avionics part. Partnership strategy, always
    requires human approval regardless of price."

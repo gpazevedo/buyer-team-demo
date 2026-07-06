@@ -78,13 +78,13 @@ Jets aviation part and drives a different orchestrator strategy:
 | Quadrant | Part | Strategy | Approval |
 | --- | --- | --- | --- |
 | `NON_CRITICAL` | Lavatory service consumable kit | `SPOT_BID` | auto-approved (low value) |
-| `LEVERAGE` | Main wheel tire, radial | `COMPETITIVE_AUCTION` | HITL if awarded price > $10k |
+| `LEVERAGE` | Main wheel tire, radial | `COMPETITIVE_AUCTION` | HITL if awarded price > $5k |
 | `BOTTLENECK` | VHF COMM transceiver | `PARTNERSHIP_RISK` | always HITL |
 | `STRATEGIC` | HPT stage-1 blade set (LLP) | `PARTNERSHIP_VALUE` | always HITL |
 
 On submit you're switched to the **Timeline** tab, which opens an SSE stream for the
 returned `negotiation_id` and updates live as the orchestrator processes it — offers
-arriving, status changes, and (for `BOTTLENECK`/`STRATEGIC`, or `LEVERAGE` over $10k) an
+arriving, status changes, and (for `BOTTLENECK`/`STRATEGIC`, or `LEVERAGE` over $5k) an
 **Approve / Reject / Cycle Back** panel once the negotiation reaches
 `PENDING_APPROVAL`.
 
@@ -124,7 +124,7 @@ elsewhere (see `backend/src/demo_harness/config.py`):
 
 ## Notes / known limits
 
-- **No VPC required for the demo to complete.** Only the 7 LLM AgentCore agent
+- **No VPC required for the demo to complete.** Only the 6 LLM AgentCore agent
   runtimes are VPC-bound; if VPC/NAT is down, Node 3/4x's own resilience layer falls
   back to deterministic pricing (bids tagged `source: <strategy>_fallback_stub`) and
   the rest of the lifecycle (ingest → classify → evaluate → approve → PO) still runs
