@@ -84,6 +84,17 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         const evt = JSON.parse(e.data);
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
+        if (evt.event === "po_issued") {
+          setState((prev) => prev ? {
+            ...prev,
+            orders: [...(prev.orders || []), {
+              order_id: evt.order_id,
+              supplier_name: evt.supplier_name,
+              total_value: evt.total_value,
+              status: evt.status || "ISSUED",
+            }],
+          } : prev);
+        }
         // Refresh state on updates
         fetch(`/demo/negotiations/${negotiationId}`)
           .then((r) => r.json())
