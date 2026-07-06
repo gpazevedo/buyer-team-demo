@@ -313,7 +313,13 @@ class DynamoClient:
             for r in to_native(rows)
         ]
         entries.sort(
-            key=lambda c: int(c["created_at"]) if isinstance(c["created_at"], (int, float)) else 0
+            key=lambda c: (
+                datetime.fromtimestamp(c["created_at"], tz=timezone.utc)
+                if isinstance(c["created_at"], (int, float))
+                else datetime.fromisoformat(c["created_at"])
+                if isinstance(c["created_at"], str)
+                else datetime.min.replace(tzinfo=timezone.utc)
+            )
         )
         return entries
 
