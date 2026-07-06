@@ -161,6 +161,23 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
 # ── PR Generator (Seam S1) ────────────────────────────────────────
 
 
+@router.get("/items")
+def preview_item(quadrant: str):
+    """Preview what item will be bought for a given Kraljic quadrant."""
+    from demo_harness.seed import ITEMS
+
+    item_def = ITEMS.get(quadrant.upper())
+    if not item_def:
+        raise HTTPException(status_code=404, detail=f"Unknown quadrant: {quadrant}")
+    return {
+        "sku": item_def["sku"],
+        "name": item_def["name"],
+        "ata": item_def["ata"],
+        "estimated_unit_price": item_def["estimated_unit_price"],
+        "lead_time_days": item_def["lead_time_days"],
+    }
+
+
 @router.get("/requisitions")
 def list_requisitions():
     """Blue Jets PRs with their line items (name/sku/quantity) — click-through list."""

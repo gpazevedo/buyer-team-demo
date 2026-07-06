@@ -1,4 +1,4 @@
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 const QUADRANTS = [
   { value: "NON_CRITICAL", label: "Non-Critical", desc: "SPOT_BID — Auto-approve", color: "green" },
@@ -6,6 +6,14 @@ const QUADRANTS = [
   { value: "BOTTLENECK", label: "Bottleneck", desc: "PARTNERSHIP_RISK — Always HITL", color: "amber" },
   { value: "STRATEGIC", label: "Strategic", desc: "PARTNERSHIP_VALUE — Always HITL", color: "red" },
 ];
+
+type ItemPreview = {
+  sku: string;
+  name: string;
+  ata: string;
+  estimated_unit_price: number;
+  lead_time_days: number;
+};
 
 type PRResult = {
   requisition_id: string;
@@ -16,10 +24,24 @@ type PRResult = {
 };
 
 export default function PRForm({ onCreated }: { onCreated: (negId: string) => void }) {
+  const [quadrant, setQuadrant] = useState("NON_CRITICAL");
+  const [quantity, setQuantity] = useState(1);
+  const [itemPreview, setItemPreview] = useState<ItemPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    setPreviewLoading(true);
+    fetch(`/demo/items?quadrant=${quadrant}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setItemPreview(data);
+        setPreviewLoading(false);
+      })
+      .catch(() => setPreviewLoading(false));
+  }, [quadrant]);
+
   const [result, submitAction, isPending] = useActionState<PRResult | null, FormData>(
     async (_prev: PRResult | null, formData: FormData) => {
-      const quadrant = formData.get("quadrant") as string;
-      const quantity = parseInt(formData.get("quantity") as string) || 1;
       console.log("[PRForm] submitting PR", { quadrant, quantity });
       const res = await fetch("/demo/requisitions", {
         method: "POST",
@@ -64,7 +86,8 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
                   type="radio"
                   name="quadrant"
                   value={q.value}
-                  defaultChecked={q.value === "NON_CRITICAL"}
+                  checked={quadrant === q.value}
+                  onChange={(e) => setQuadrant(e.target.value)}
                   className="mt-1"
                 />
                 <div>
@@ -76,6 +99,27 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
           </div>
         </fieldset>
 
+        {/* Item preview */}
+        {previewLoading && (
+          <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700 text-xs text-gray-400">
+            Loading item info...
+          </div>
+        )}
+        {itemPreview && !previewLoading && (
+          <div className="p-3 rounded-lg bg-gray-800/50 border border-gray-700">
+            <div className="text-xs text-gray-500 mb-1">Selected item</div>
+            <div className="text-sm font-medium">{itemPreview.name}</div>
+            <div className="text-xs text-gray-400 mt-1 space-y-0.5">
+              <div>SKU: {itemPreview.sku} | ATA: {itemPreview.ata}</div>
+              <div>Est. unit price: ${itemPreview.estimated_unit_price.toLocaleString()}</div>
+              <div>Lead time: {itemPreview.lead_time_days} days</div>
+              <div className="text-blue-400 font-medium">
+                Est. total: ${(itemPreview.estimated_unit_price * quantity).toLocaleString()} (qty {quantity})
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Quantity */}
         <div>
           <label className="text-sm font-medium text-gray-300 block mb-1">
@@ -84,7 +128,8 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
           <input
             type="number"
             name="quantity"
-            defaultValue={1}
+            value={quantity}
+            onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
             min={1}
             max={100}
             className="w-32 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm"
