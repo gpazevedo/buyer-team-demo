@@ -67,10 +67,19 @@ async def _publish(negotiation_id: str, event: dict) -> None:
             pass
 
 
+_FEEDBACK_TYPES = {"AUCTION_ROUND_FEEDBACK"}
+
+
 def _query_communications(negotiation_id: str) -> list[dict]:
     """Read communications for one negotiation from DynamoDB."""
     entries = dynamo_client.get_communications(TENANT_ID, negotiation_id)
     return [e for e in entries if e.get("type") == "BID_INVITATION"]
+
+
+def _query_feedback(negotiation_id: str) -> list[dict]:
+    """Read auction-round feedback communications for one negotiation."""
+    entries = dynamo_client.get_communications(TENANT_ID, negotiation_id)
+    return [e for e in entries if e.get("type") in _FEEDBACK_TYPES]
 
 
 def _query_bids(negotiation_id: str) -> list[dict]:
@@ -95,6 +104,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
         neg = _query_negotiation(negotiation_id)
         bids = _query_bids(negotiation_id)
         invitations = _query_communications(negotiation_id)
+        feedback = _query_feedback(negotiation_id)
     except Exception:
         logger.exception("poll failed for %s", negotiation_id)
         return None
@@ -130,6 +140,23 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     },
                 )
 
+    # Detect new auction-round feedback
+    prev_feedback_ids = {
+        f["communication_id"] for f in prev.get("feedback", []) if f.get("communication_id")
+    }
+    current_feedback_ids = {f["communication_id"] for f in feedback if f.get("communication_id")}
+    new_feedback_ids = current_feedback_ids - prev_feedback_ids
+    if new_feedback_ids:
+        for f in feedback:
+            if f["communication_id"] in new_feedback_ids:
+                logger.info(
+                    "auction round feedback negotiation=%s supplier=%s rank=%s",
+                    negotiation_id,
+                    f.get("supplier_name") or f.get("supplier_id"),
+                    f.get("current_rank"),
+                )
+                await _publish(negotiation_id, {**f, "event": "auction_round_feedback"})
+
     # Detect new or changed bids (amount or evaluation_rank changed)
     priced_bids = [b for b in bids if b.get("total_amount") or b.get("amount")]
     prev_priced = {
@@ -155,6 +182,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
         "strategy": neg.get("strategy") if neg else None,
         "approval_block_reason": neg.get("approval_block_reason") if neg else None,
         "invitations": invitations,
+        "feedback": feedback,
         "bids": bids,
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
