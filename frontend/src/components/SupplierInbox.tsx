@@ -38,6 +38,11 @@ type RfqEntry = {
   response: Bid | null;
 };
 
+function ts(value: string | number | undefined): number {
+  if (!value) return 0;
+  return typeof value === "number" ? value : new Date(value).getTime() / 1000;
+}
+
 function formatTimestamp(value: string | number | undefined): string {
   if (!value) return "unknown time";
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
@@ -166,7 +171,8 @@ export default function SupplierInbox() {
                       <span className="text-gray-500">Invitations: </span>
                       {entry.invitations.length === 0
                         ? "none recorded"
-                        : entry.invitations
+                        : [...entry.invitations]
+                            .sort((a, b) => ts(b.created_at) - ts(a.created_at))
                             .map((i) => `${i.type} (${formatTimestamp(i.created_at)})`)
                             .join(", ")}
                     </div>
@@ -190,7 +196,7 @@ export default function SupplierInbox() {
                         "none yet"
                       ) : (
                         <div className="mt-1 flex flex-col gap-1">
-                          {entry.feedback.map((f) => (
+                          {[...entry.feedback].sort((a, b) => ts(b.created_at) - ts(a.created_at)).map((f) => (
                             <span
                               key={f.communication_id}
                               className={`px-1.5 py-0.5 rounded text-[10px] font-medium w-fit ${feedbackColor(f.type)}`}

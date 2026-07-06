@@ -264,6 +264,21 @@ def get_supplier_rfqs(supplier_id: str):
         entry["status"] = neg.get("status") if neg else None
         entry["quadrant"] = neg.get("kraljic_quadrant") if neg else None
 
-    result = sorted(by_negotiation.values(), key=lambda e: e["negotiation_id"])
+    def _latest_ts(entry: dict) -> float:
+        """Latest timestamp across invitations, feedback, and bid response."""
+        ts = 0.0
+        for c in entry.get("invitations", []):
+            v = c.get("created_at")
+            ts = max(ts, float(v) if isinstance(v, (int, float)) else 0)
+        for c in entry.get("feedback", []):
+            v = c.get("created_at")
+            ts = max(ts, float(v) if isinstance(v, (int, float)) else 0)
+        bid = entry.get("response")
+        if bid:
+            v = bid.get("created_at") or bid.get("priced_at")
+            ts = max(ts, float(v) if isinstance(v, (int, float)) else 0)
+        return ts
+
+    result = sorted(by_negotiation.values(), key=_latest_ts, reverse=True)
     logger.info("supplier %s: %d RFQ negotiations", supplier_id, len(result))
     return result
