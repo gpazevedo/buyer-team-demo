@@ -84,6 +84,17 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         const evt = JSON.parse(e.data);
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
+        if (evt.event === "award_issued") {
+          setState((prev) => prev ? {
+            ...prev,
+            awards: [...(prev.awards || []), {
+              award_id: evt.award_id,
+              supplier_name: evt.supplier_name,
+              total_amount: evt.total_amount,
+              savings_amount: evt.savings_amount,
+            }],
+          } : prev);
+        }
         if (evt.event === "po_issued") {
           setState((prev) => prev ? {
             ...prev,
