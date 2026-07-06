@@ -105,12 +105,18 @@ async def poll_once(negotiation_id: str) -> dict | None:
     prev = _state.get(negotiation_id, {})
     prev_bids = prev.get("bids", [])
 
-    # Detect new or changed bids
+    # Detect new or changed bids (amount or evaluation_rank changed)
     priced_bids = [b for b in bids if b.get("total_amount") or b.get("amount")]
-    prev_priced = {b["bid_id"] for b in prev_bids if b.get("total_amount") or b.get("amount")}
-    current_priced = {b["bid_id"] for b in priced_bids}
-
-    new_priced = current_priced - prev_priced
+    prev_priced = {
+        (b["bid_id"], b.get("amount") or b.get("total_amount"), b.get("evaluation_rank"))
+        for b in prev_bids
+        if b.get("total_amount") or b.get("amount")
+    }
+    current_priced = {
+        (b["bid_id"], b.get("amount") or b.get("total_amount"), b.get("evaluation_rank"))
+        for b in priced_bids
+    }
+    new_priced_ids = {fp[0] for fp in current_priced - prev_priced}
 
     names = _supplier_name_map(TENANT_ID)
     for b in bids:
@@ -191,7 +197,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
     state["award_ids"] = list(current_award_ids)
 
     # Publish events for newly priced bids
-    for bid_id in new_priced:
+    for bid_id in new_priced_ids:
         bid = next((b for b in bids if b["bid_id"] == bid_id), None)
         if bid:
             logger.info(
