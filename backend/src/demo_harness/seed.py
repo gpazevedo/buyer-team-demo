@@ -10,11 +10,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from uuid import NAMESPACE_DNS, uuid5
 
 import boto3
 from test_tenant_app.clients.ddb import to_decimal
+
+logger = logging.getLogger("demo_harness.seed")
 
 ENV = os.getenv("ENV", "dev")
 REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -261,11 +264,19 @@ def seed_suppliers(ddb, env: str, cat_ids: dict[str, str]) -> dict[str, str]:
 
 def seed(env: str = ENV, region: str = REGION) -> dict:
     """Run the full Blue Jets seed. Idempotent — safe to re-run."""
+    logger.info("seeding Blue Jets tenant env=%s region=%s", env, region)
     ddb = boto3.resource("dynamodb", region_name=region)
     seed_tenant(ddb, env)
     cat_ids = seed_categories(ddb, env)
     item_ids = seed_items(ddb, env, cat_ids)
     sup_ids = seed_suppliers(ddb, env, cat_ids)
+    logger.info(
+        "seed complete tenant_id=%s categories=%d items=%d suppliers=%d",
+        TENANT_ID,
+        len(cat_ids),
+        len(item_ids),
+        len(sup_ids),
+    )
     return {
         "tenant_id": TENANT_ID,
         "category_ids": cat_ids,

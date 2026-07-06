@@ -5,7 +5,10 @@ Routes:
   GET  /demo/negotiations/{id}          — merged snapshot
   GET  /demo/negotiations/{id}/stream   — SSE timeline
   POST /demo/negotiations/{id}/approve  — HITL release via GraphClient
+  GET  /demo/requisitions               — PR list (items, qty, status)
+  POST /demo/requisitions               — create a PR (Seam S1)
   GET  /demo/suppliers                  — roster + communications
+  GET  /demo/suppliers/{id}/rfqs        — per-negotiation RFQs/response/feedback for one supplier
 """
 
 from __future__ import annotations
@@ -19,12 +22,23 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.graph_client import graph_client
+from test_tenant_app.clients.master_data_client import master_data_client
 
 from demo_harness.config import TENANT_ID
+from demo_harness.health import check_buyer_team
 from demo_harness.offer_projection import get_state, poll_once, subscribe, unsubscribe
 
 logger = logging.getLogger("demo_harness.observer")
 router = APIRouter(prefix="/demo")
+
+
+# ── Buyer Team reachability ───────────────────────────────────────
+
+
+@router.get("/health")
+def buyer_team_health():
+    """Is the real Buyer Team orchestrator reachable? (Node 6 Lambda + master-store tables)"""
+    return check_buyer_team()
 
 
 # ── Request/response models ───────────────────────────────────────
@@ -52,6 +66,7 @@ async def get_negotiation(negotiation_id: str):
         # Try a fresh poll even if not tracked yet
         state = get_state(negotiation_id)
     if not state:
+        logger.info("negotiation %s not found (not yet started?)", negotiation_id)
         raise HTTPException(status_code=404, detail="Negotiation not found")
 
     # Read awards + orders from Dynamo
@@ -122,6 +137,7 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
         )
 
     approver = {"user_id": "demo-harness", "tenant_id": TENANT_ID, "claims": {}}
+    logger.info("approval decision=%s requisition_id=%s", decision, requisition_id)
 
     try:
         if decision == "APPROVED":
@@ -135,13 +151,22 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
             )
         else:
             result = graph_client.cycle_back_award(TENANT_ID, requisition_id, approver)
+        logger.info("approval %s succeeded for %s: %s", decision, requisition_id, result)
         return {"status": "ok", "decision": decision, "result": result}
     except Exception as e:
-        logger.exception("approval failed for %s", requisition_id)
+        logger.exception("approval %s failed for %s", decision, requisition_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── PR Generator (Seam S1) ────────────────────────────────────────
+
+
+@router.get("/requisitions")
+def list_requisitions():
+    """Blue Jets PRs with their line items (name/sku/quantity) — click-through list."""
+    prs = master_data_client.list_prs(TENANT_ID)
+    logger.info("listed %d requisitions for tenant %s", len(prs), TENANT_ID)
+    return prs
 
 
 @router.post("/requisitions")
@@ -149,11 +174,18 @@ def create_requisition(body: PRRequest):
     """Generate + submit a PR via the canonical master-store intake."""
     from demo_harness.pr_generator import build_pr
 
+    logger.info("creating PR quadrant=%s quantity=%d", body.quadrant, body.quantity)
     try:
         pr = build_pr(body.quadrant, body.quantity)
     except ValueError as e:
+        logger.warning("PR creation rejected: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
+    logger.info(
+        "PR created requisition_id=%s negotiation_id=%s",
+        pr["requisition_id"],
+        pr["negotiation_id"],
+    )
     return pr
 
 
@@ -172,6 +204,66 @@ def list_suppliers():
             .query(KeyConditionExpression=Key("tenant_id").eq(TENANT_ID))
             .get("Items", [])
         )
+        logger.info("suppliers: %d rows for tenant %s", len(items), TENANT_ID)
         return to_native(items)
     except Exception:
+        logger.exception("supplier query failed")
         return []
+
+
+# `{env}-communications` has no supplier_id index (pk/sk only, keyed by negotiation) —
+# scanning filtered by supplier_id is the only query path, same tradeoff `get_orders`
+# already makes on `test-tenant-orders`. supplier_id is a uuid5 hash of tenant+name, so
+# no cross-tenant filter is needed to keep this scoped to one supplier.
+INVITATION_TYPES = {"BID_INVITATION", "AUCTION_INVITATION"}
+FEEDBACK_TYPES = {"AWARD_NOTIFICATION", "REJECTION_NOTIFICATION", "AUCTION_ROUND_FEEDBACK"}
+
+
+@router.get("/suppliers/{supplier_id}/rfqs")
+def get_supplier_rfqs(supplier_id: str):
+    """For one supplier: every negotiation it was invited to, its response (bid),
+    and the feedback it received back (award/rejection/auction-round feedback)."""
+    from boto3.dynamodb.conditions import Attr, Key
+    from test_tenant_app.clients.ddb import table, to_native
+
+    comms = to_native(
+        table("communications")
+        .scan(FilterExpression=Attr("supplier_id").eq(supplier_id))
+        .get("Items", [])
+    )
+    bids = to_native(
+        table("bids").query(KeyConditionExpression=Key("tenant_id").eq(TENANT_ID)).get("Items", [])
+    )
+    bids_by_negotiation = {
+        b["negotiation_id"]: b for b in bids if b.get("supplier_id") == supplier_id
+    }
+
+    by_negotiation: dict[str, dict] = {}
+    for c in comms:
+        negotiation_id = c.get("negotiation_id")
+        if not negotiation_id:
+            continue
+        entry = by_negotiation.setdefault(
+            negotiation_id, {"negotiation_id": negotiation_id, "invitations": [], "feedback": []}
+        )
+        if c["type"] in INVITATION_TYPES:
+            entry["invitations"].append(c)
+        elif c["type"] in FEEDBACK_TYPES:
+            entry["feedback"].append(c)
+
+    # A bid can exist with no invitation on record (e.g. the resilience fallback path
+    # prices a bid without the agent ever calling send_bid_invitation) — surface it anyway.
+    for negotiation_id in bids_by_negotiation:
+        by_negotiation.setdefault(
+            negotiation_id, {"negotiation_id": negotiation_id, "invitations": [], "feedback": []}
+        )
+
+    for negotiation_id, entry in by_negotiation.items():
+        entry["response"] = bids_by_negotiation.get(negotiation_id)
+        neg = dynamo_client.get_negotiation(TENANT_ID, negotiation_id)
+        entry["status"] = neg.get("status") if neg else None
+        entry["quadrant"] = neg.get("kraljic_quadrant") if neg else None
+
+    result = sorted(by_negotiation.values(), key=lambda e: e["negotiation_id"])
+    logger.info("supplier %s: %d RFQ negotiations", supplier_id, len(result))
+    return result

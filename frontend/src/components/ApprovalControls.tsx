@@ -11,6 +11,7 @@ export default function ApprovalControls({ requisitionId, blockReason }: Props) 
 
   async function handleDecision(decision: string, reason?: string) {
     startTransition(async () => {
+      console.log("[ApprovalControls] submitting decision", { requisitionId, decision, reason });
       try {
         const res = await fetch(`/demo/negotiations/${requisitionId}/approve`, {
           method: "POST",
@@ -18,8 +19,10 @@ export default function ApprovalControls({ requisitionId, blockReason }: Props) 
           body: JSON.stringify({ decision, reason }),
         });
         const data = await res.json();
+        console.log("[ApprovalControls] decision result", data);
         setResult(`${decision}: ${JSON.stringify(data)}`);
       } catch (e) {
+        console.error("[ApprovalControls] decision failed", e);
         setResult(`Error: ${e}`);
       }
     });

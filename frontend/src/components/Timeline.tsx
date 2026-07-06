@@ -55,29 +55,48 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
   useEffect(() => {
     if (!negotiationId) return;
 
+    console.log("[Timeline] watching negotiation", negotiationId);
+
     // Initial snapshot
     fetch(`/demo/negotiations/${negotiationId}`)
       .then((r) => r.json())
-      .then(setState)
-      .catch(() => {});
+      .then((s) => {
+        console.log("[Timeline] initial snapshot", s);
+        setState(s);
+      })
+      .catch((e) => console.error("[Timeline] initial snapshot failed", e));
 
     // SSE stream
     const es = new EventSource(`/demo/negotiations/${negotiationId}/stream`);
+    es.onopen = () => console.log("[Timeline] SSE connected", negotiationId);
+    es.onerror = (e) => console.error("[Timeline] SSE error", e);
     es.addEventListener("snapshot", (e) => {
-      try { setState(JSON.parse(e.data)); } catch {}
+      try {
+        const s = JSON.parse(e.data);
+        console.log("[Timeline] SSE snapshot", s);
+        setState(s);
+      } catch (err) {
+        console.error("[Timeline] failed to parse snapshot event", err);
+      }
     });
     es.addEventListener("update", (e) => {
       try {
         const evt = JSON.parse(e.data);
+        console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
         // Refresh state on updates
         fetch(`/demo/negotiations/${negotiationId}`)
           .then((r) => r.json())
           .then(setState)
-          .catch(() => {});
-      } catch {}
+          .catch((err) => console.error("[Timeline] refresh after update failed", err));
+      } catch (err) {
+        console.error("[Timeline] failed to parse update event", err);
+      }
     });
-    return () => es.close();
+    return () => {
+      console.log("[Timeline] closing SSE", negotiationId);
+      es.close();
+    };
   }, [negotiationId]);
 
   if (!negotiationId) {

@@ -9,7 +9,14 @@ type Bid = {
   source?: string;
   status?: string;
   evaluation_rank?: number;
+  priced_at?: number;
+  created_at?: number;
 };
+
+function formatEpoch(seconds?: number): string | null {
+  if (!seconds) return null;
+  return new Date(seconds * 1000).toLocaleString();
+}
 
 export default function OfferCard({ bid }: { bid: Bid }) {
   const isPriced = !!bid.amount;
@@ -64,6 +71,7 @@ export default function OfferCard({ bid }: { bid: Bid }) {
       {/* Status */}
       <div className="text-[10px] text-gray-500 mt-1.5">
         {bid.status || "UNKNOWN"} — {bid.bid_id}
+        {formatEpoch(bid.priced_at) && <> · priced {formatEpoch(bid.priced_at)}</>}
       </div>
     </div>
   );

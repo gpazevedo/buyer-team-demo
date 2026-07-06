@@ -20,6 +20,7 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
     async (_prev: PRResult | null, formData: FormData) => {
       const quadrant = formData.get("quadrant") as string;
       const quantity = parseInt(formData.get("quantity") as string) || 1;
+      console.log("[PRForm] submitting PR", { quadrant, quantity });
       const res = await fetch("/demo/requisitions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -27,10 +28,12 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
       });
       if (!res.ok) {
         const err = await res.text();
+        console.error("[PRForm] PR creation failed", res.status, err);
         alert(`Error: ${err}`);
         return null;
       }
       const data = await res.json();
+      console.log("[PRForm] PR created", data);
       onCreated(data.negotiation_id);
       return data;
     },

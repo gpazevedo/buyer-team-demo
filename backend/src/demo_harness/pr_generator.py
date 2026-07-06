@@ -7,12 +7,15 @@ live test_tenant_app /api/requisitions route calls. No reimplementation.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from test_tenant_app.clients.master_data_client import master_data_client
 
 from demo_harness.config import TENANT_ID
 from demo_harness.seed import ITEMS, _item_id
+
+logger = logging.getLogger("demo_harness.pr_generator")
 
 BLUE_JETS_ADDRESS = "Blue Jets MRO Hub, Hangar 4, JFK International, New York, NY 11430"
 
@@ -38,6 +41,7 @@ def build_pr(quadrant: str, quantity: int = 1) -> dict:
         }
     ]
 
+    logger.info("submitting PR sku=%s quadrant=%s quantity=%d", item_def["sku"], quadrant, quantity)
     pr = master_data_client.create_pr(
         tenant_id=TENANT_ID,
         items=items,
@@ -51,6 +55,11 @@ def build_pr(quadrant: str, quantity: int = 1) -> dict:
     from uuid import NAMESPACE_DNS, uuid5
 
     negotiation_id = str(uuid5(NAMESPACE_DNS, f"{TENANT_ID}:negotiation:{pr['requisition_id']}"))
+    logger.info(
+        "PR %s submitted to master store, expecting negotiation %s to start via pr_event_router",
+        pr["requisition_id"],
+        negotiation_id,
+    )
 
     return {
         "requisition_id": pr["requisition_id"],

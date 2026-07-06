@@ -133,6 +133,13 @@ async def poll_once(negotiation_id: str) -> dict | None:
     for bid_id in new_priced:
         bid = next((b for b in bids if b["bid_id"] == bid_id), None)
         if bid:
+            logger.info(
+                "offer received negotiation=%s supplier=%s amount=%s source=%s",
+                negotiation_id,
+                bid.get("supplier_name") or bid.get("supplier_id"),
+                bid.get("amount") or bid.get("total_amount"),
+                bid.get("source"),
+            )
             await _publish(
                 negotiation_id,
                 {
@@ -152,6 +159,12 @@ async def poll_once(negotiation_id: str) -> dict | None:
     # Publish status change
     prev_status = prev.get("status")
     if neg and neg.get("status") != prev_status:
+        logger.info(
+            "status change negotiation=%s %s -> %s",
+            negotiation_id,
+            prev_status,
+            neg.get("status"),
+        )
         await _publish(
             negotiation_id,
             {

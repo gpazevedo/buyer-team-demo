@@ -69,6 +69,7 @@ app.include_router(demo_router)
 @app.post("/demo/seed")
 def run_seed():
     """Idempotent Blue Jets seed — safe to re-run."""
+    logger.info("POST /demo/seed")
     os.environ.setdefault("SKILL_MODE", "live")
     result = seed()
     return {"status": "ok", **result}
@@ -78,7 +79,9 @@ def run_seed():
 def get_seed_status():
     """Check which Blue Jets entities exist."""
     os.environ.setdefault("SKILL_MODE", "live")
-    return seed_status()
+    status = seed_status()
+    logger.info("GET /demo/seed/status -> %s", status)
+    return status
 
 
 @app.get("/healthz", include_in_schema=False)
