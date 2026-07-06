@@ -312,7 +312,9 @@ class DynamoClient:
             }
             for r in to_native(rows)
         ]
-        entries.sort(key=lambda c: c["created_at"] or "")
+        entries.sort(
+            key=lambda c: int(c["created_at"]) if isinstance(c["created_at"], (int, float)) else 0
+        )
         return entries
 
     def get_bids(self, tenant_id: str, requisition_id: str) -> list[dict]:
