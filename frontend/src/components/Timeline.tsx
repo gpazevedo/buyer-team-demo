@@ -84,6 +84,36 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         const evt = JSON.parse(e.data);
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
+        if (evt.event === "offer_received") {
+          setState((prev) => prev ? {
+            ...prev,
+            bids: evt.bid_id && prev.bids?.some((b) => b.bid_id === evt.bid_id)
+              ? prev.bids.map((b) => b.bid_id === evt.bid_id ? {
+                  ...b,
+                  supplier_id: evt.supplier_id || b.supplier_id,
+                  supplier_name: evt.supplier_name || b.supplier_name,
+                  amount: evt.amount ?? b.amount,
+                  unit_price: evt.unit_price ?? b.unit_price,
+                  delivery_days: evt.delivery_days ?? b.delivery_days,
+                  currency: evt.currency || b.currency,
+                  source: evt.source || b.source,
+                  status: evt.status || b.status,
+                  evaluation_rank: evt.evaluation_rank ?? b.evaluation_rank,
+                } : b)
+              : [...(prev.bids || []), {
+                  bid_id: evt.bid_id,
+                  supplier_id: evt.supplier_id,
+                  supplier_name: evt.supplier_name,
+                  amount: evt.amount,
+                  unit_price: evt.unit_price,
+                  delivery_days: evt.delivery_days,
+                  currency: evt.currency,
+                  source: evt.source,
+                  status: evt.status,
+                  evaluation_rank: evt.evaluation_rank,
+                }],
+          } : prev);
+        }
         if (evt.event === "award_issued") {
           setState((prev) => prev ? {
             ...prev,

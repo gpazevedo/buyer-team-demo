@@ -206,6 +206,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                 {
                     "event": "offer_received",
                     "negotiation_id": negotiation_id,
+                    "bid_id": bid.get("bid_id"),
                     "supplier_id": bid.get("supplier_id"),
                     "supplier_name": bid.get("supplier_name"),
                     "amount": bid.get("amount") or bid.get("total_amount"),
@@ -214,6 +215,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     "currency": bid.get("currency"),
                     "source": bid.get("source"),
                     "status": bid.get("status"),
+                    "evaluation_rank": bid.get("evaluation_rank"),
                 },
             )
 
