@@ -250,6 +250,31 @@ async def poll_once(negotiation_id: str) -> dict | None:
                 },
             )
 
+    # Publish classification change (quadrant / strategy)
+    if neg:
+        prev_quadrant = prev.get("quadrant")
+        prev_strategy = prev.get("strategy")
+        cur_quadrant = neg.get("kraljic_quadrant")
+        cur_strategy = neg.get("strategy")
+        if (cur_quadrant and cur_quadrant != prev_quadrant) or (
+            cur_strategy and cur_strategy != prev_strategy
+        ):
+            logger.info(
+                "classification defined negotiation=%s quadrant=%s strategy=%s",
+                negotiation_id,
+                cur_quadrant,
+                cur_strategy,
+            )
+            await _publish(
+                negotiation_id,
+                {
+                    "event": "classification_defined",
+                    "negotiation_id": negotiation_id,
+                    "quadrant": cur_quadrant,
+                    "strategy": cur_strategy,
+                },
+            )
+
     # Publish status change
     prev_status = prev.get("status")
     if neg and neg.get("status") != prev_status:
