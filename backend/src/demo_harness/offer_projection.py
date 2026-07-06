@@ -129,6 +129,35 @@ async def poll_once(negotiation_id: str) -> dict | None:
     }
     _state[negotiation_id] = state
 
+    # Publish events for newly issued POs
+    prev_order_ids: set[str] = set(prev.get("order_ids", []))
+    current_orders = (
+        dynamo_client.get_orders(TENANT_ID) if neg and neg.get("requisition_id") else []
+    )
+    current_order_ids = {o["order_id"] for o in current_orders if o.get("order_id")}
+    new_order_ids = current_order_ids - prev_order_ids
+    if new_order_ids:
+        for o in current_orders:
+            if o["order_id"] in new_order_ids:
+                logger.info(
+                    "po issued negotiation=%s order_id=%s total=%s",
+                    negotiation_id,
+                    o["order_id"],
+                    o.get("total_value"),
+                )
+                await _publish(
+                    negotiation_id,
+                    {
+                        "event": "po_issued",
+                        "negotiation_id": negotiation_id,
+                        "order_id": o["order_id"],
+                        "supplier_name": o.get("supplier_name"),
+                        "total_value": o.get("total_value"),
+                        "status": o.get("status"),
+                    },
+                )
+    state["order_ids"] = list(current_order_ids)
+
     # Publish events for newly priced bids
     for bid_id in new_priced:
         bid = next((b for b in bids if b["bid_id"] == bid_id), None)
