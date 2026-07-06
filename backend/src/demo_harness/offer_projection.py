@@ -105,6 +105,31 @@ async def poll_once(negotiation_id: str) -> dict | None:
     prev = _state.get(negotiation_id, {})
     prev_bids = prev.get("bids", [])
 
+    # Detect new RFQ invitations
+    prev_invite_ids = {
+        i["communication_id"] for i in prev.get("invitations", []) if i.get("communication_id")
+    }
+    current_invite_ids = {i["communication_id"] for i in invitations if i.get("communication_id")}
+    new_invite_ids = current_invite_ids - prev_invite_ids
+    if new_invite_ids:
+        for invite in invitations:
+            if invite["communication_id"] in new_invite_ids:
+                logger.info(
+                    "rfq sent negotiation=%s supplier=%s",
+                    negotiation_id,
+                    invite.get("supplier_name") or invite.get("supplier_id"),
+                )
+                await _publish(
+                    negotiation_id,
+                    {
+                        "event": "rfq_sent",
+                        "negotiation_id": negotiation_id,
+                        "supplier_id": invite.get("supplier_id"),
+                        "supplier_name": invite.get("supplier_name"),
+                        "created_at": invite.get("created_at"),
+                    },
+                )
+
     # Detect new or changed bids (amount or evaluation_rank changed)
     priced_bids = [b for b in bids if b.get("total_amount") or b.get("amount")]
     prev_priced = {
