@@ -60,12 +60,29 @@ const QUADRANT_COLORS: Record<string, string> = {
 export default function Timeline({ negotiationId, initialQuadrant }: { negotiationId: string | null; initialQuadrant: string | null }) {
   const [state, setState] = useState<NegotiationState | null>(null);
   const [events, setEvents] = useState<string[]>([]);
+  const [traceUrls, setTraceUrls] = useState<{ sfn: string | null; xray: string | null }>({ sfn: null, xray: null });
 
   useEffect(() => {
     if (!negotiationId) return;
 
     sessionStorage.setItem("demo:negotiationId", negotiationId);
     console.log("[Timeline] watching negotiation", negotiationId);
+
+    // Fetch trace URLs — X-Ray takes ~30-60s to index, poll until found
+    const fetchTraces = () => {
+      fetch(`/demo/negotiations/${negotiationId}/traces`)
+        .then((r) => r.json())
+        .then((urls) => {
+          setTraceUrls((prev) => {
+            // Keep existing URLs, update with new ones
+            if (urls.sfn || urls.xray) return urls;
+            return prev;
+          });
+        })
+        .catch(() => {});
+    };
+    fetchTraces();
+    const traceInterval = setInterval(fetchTraces, 10000);
 
     // Initial snapshot
     fetch(`/demo/negotiations/${negotiationId}`)
@@ -190,6 +207,7 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
       console.log("[Timeline] closing SSE", negotiationId);
       es.close();
       clearInterval(pollRef.current);
+      clearInterval(traceInterval);
     };
   }, [negotiationId]);
 
@@ -219,8 +237,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
   return (
     <div className="max-w-4xl">
       {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold mb-2">Negotiation Timeline</h2>
+      <div className="mb-3">
+        <h2 className="text-xl font-bold mb-1">Negotiation Timeline</h2>
         <div className="flex items-center gap-3 text-sm">
           <code className="text-gray-400 font-mono text-xs">{negotiationId}</code>
           {state?.quadrant && (
@@ -244,20 +262,46 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         {state?.requisition_id && (
           <code className="text-xs text-gray-500 mt-1 block">PR: {state.requisition_id}</code>
         )}
+        <div className="flex gap-3 mt-1">
+          <span className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${traceUrls.sfn ? "bg-green-500" : "bg-gray-600"}`} />
+            {traceUrls.sfn ? (
+              <a href={traceUrls.sfn} target="_blank" rel="noreferrer"
+                 className="text-xs text-gray-500 hover:text-blue-400 transition-colors">
+                SFN Trace ↗
+              </a>
+            ) : (
+              <span className="text-xs text-gray-600">SFN</span>
+            )}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${traceUrls.xray ? "bg-green-500" : traceUrls.sfn ? "bg-red-500 animate-pulse" : "bg-gray-600"}`} />
+            {traceUrls.xray ? (
+              <a href={traceUrls.xray} target="_blank" rel="noreferrer"
+                 className="text-xs text-gray-500 hover:text-blue-400 transition-colors">
+                X-Ray Trace ↗
+              </a>
+            ) : (
+              <span className="text-xs text-gray-600">
+                {traceUrls.sfn ? "X-Ray pending..." : "X-Ray"}
+              </span>
+            )}
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}
       {state && (
-        <div className="mb-8">
+        <div className="mb-4">
           <ProgressBar status={state.status} />
         </div>
       )}
 
       {/* Strategy Classification */}
       {(state?.quadrant || initialQuadrant) && (
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold mb-3">Strategy Classification</h3>
-          <div className="p-4 rounded-lg bg-gray-800 border border-cyan-800">
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Strategy Classification</h3>
+          <div className="p-3 rounded-lg bg-gray-800 border border-cyan-800">
             <div className="flex items-center gap-3">
               <span className={`px-2 py-1 rounded border text-sm font-medium ${
                 (state?.quadrant || initialQuadrant) === "NON_CRITICAL" ? "bg-green-900/50 text-green-300 border-green-700" :
@@ -286,8 +330,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* RFQ Sent */}
       {state?.invitations && state.invitations.length > 0 && (
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold mb-3">Suppliers Invited</h3>
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Suppliers Invited</h3>
           <div className="flex flex-wrap gap-2">
             {state.invitations.map((inv) => (
               <span
@@ -303,8 +347,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* Bids / Offers */}
       {state?.bids && state.bids.length > 0 && (
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold mb-3">Supplier Offers</h3>
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Supplier Offers</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {state.bids.map((bid) => (
               <OfferCard key={bid.bid_id} bid={bid} />
@@ -315,7 +359,7 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* Approval Controls */}
       {state?.status === "PENDING_APPROVAL" && state.requisition_id && (
-        <section className="mb-8">
+        <section className="mb-4">
           <ApprovalControls
             requisitionId={state.requisition_id}
             blockReason={state.approval_block_reason}
@@ -325,10 +369,10 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* Award */}
       {state?.awards && state.awards.length > 0 && (
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold mb-3">Award</h3>
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Award</h3>
           {state.awards.map((a) => (
-            <div key={a.award_id} className="p-4 rounded-lg bg-gray-800 border border-gray-700">
+            <div key={a.award_id} className="p-3 rounded-lg bg-gray-800 border border-gray-700">
               <div className="flex justify-between items-center">
                 <div>
                   <div className="font-medium">{a.supplier_name}</div>
@@ -345,8 +389,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* PO Issued */}
       {state?.orders && state.orders.length > 0 && (
-        <section className="mb-8">
-          <h3 className="text-lg font-semibold mb-3">Purchase Order</h3>
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Purchase Order</h3>
           {state.orders.map((o) => (
             <div key={o.order_id} className="p-4 rounded-lg bg-green-950/30 border border-green-800">
               <div className="flex justify-between items-center">

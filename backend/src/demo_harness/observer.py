@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 
+import boto3
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -217,6 +219,75 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
     except Exception as e:
         logger.exception("approval %s failed for %s", decision, requisition_id)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Trace resolution ──────────────────────────────────────────────
+
+
+@router.get("/negotiations/{negotiation_id}/traces")
+async def get_trace_urls(negotiation_id: str):
+    """Resolve SFN execution + X-Ray trace URLs for a negotiation."""
+    from datetime import timedelta
+
+    urls: dict = {"sfn": None, "xray": None}
+
+    # SFN: execution name is deterministic (neg-{negotiation_id})
+    try:
+        sfn = boto3.client("stepfunctions", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        machines = sfn.list_state_machines()["stateMachines"]
+        arn = next((m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None)
+        if arn:
+            name = f"neg-{negotiation_id}"
+            exec_arn = f"{arn.replace('stateMachine', 'execution')}:{name}"
+            urls["sfn"] = (
+                f"https://{os.getenv('AWS_REGION', 'us-east-1')}.console.aws.amazon.com"
+                f"/states/home?region={os.getenv('AWS_REGION', 'us-east-1')}"
+                f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
+            )
+            # Get trace ID from execution history (TaskStateExited events carry trace headers)
+            try:
+                history = sfn.get_execution_history(
+                    executionArn=exec_arn, maxResults=5, reverseOrder=True
+                )
+                exec_start = None
+                exec_end = None
+                for evt in history["events"]:
+                    if evt["type"] == "ExecutionSucceeded":
+                        exec_end = evt["timestamp"]
+                    elif evt["type"] == "ExecutionStarted":
+                        exec_start = evt["timestamp"]
+                if exec_start and exec_end:
+                    xray = boto3.client("xray", region_name=os.getenv("AWS_REGION", "us-east-1"))
+                    # X-Ray indexing has sub-minute latency but the query window must be
+                    # wide enough. Use ±5 minutes around the execution.
+                    traces = xray.get_trace_summaries(
+                        StartTime=exec_start - timedelta(minutes=5),
+                        EndTime=exec_end + timedelta(minutes=5),
+                        TimeRangeType="TraceId",
+                    )["TraceSummaries"]
+                    duration = (exec_end - exec_start).total_seconds()
+                    # Find trace closest in duration and start time
+                    best = None
+                    best_score = float("inf")
+                    for t in traces:
+                        dur_diff = abs(t["Duration"] - duration)
+                        time_diff = abs((t["StartTime"] - exec_start).total_seconds())
+                        score = dur_diff + time_diff * 0.5
+                        if score < best_score and dur_diff < 20:
+                            best_score = score
+                            best = t
+                    if best:
+                        urls["xray"] = (
+                            f"https://{os.getenv('AWS_REGION', 'us-east-1')}.console.aws.amazon.com"
+                            f"/xray/home?region={os.getenv('AWS_REGION', 'us-east-1')}"
+                            f"#/traces/{best['Id']}"
+                        )
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("trace resolution failed for %s", negotiation_id)
+
+    return urls
 
 
 # ── PR Generator (Seam S1) ────────────────────────────────────────
