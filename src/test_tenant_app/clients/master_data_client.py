@@ -208,6 +208,7 @@ class MasterDataClient:
         delivery_threshold_days: int,
         delivery_ideal_days: int | None = None,
         budget_limit: float | None = None,
+        correlation_id: str | None = None,
     ) -> dict:
         requisition_id = str(uuid4())
         now = datetime.now(tz=timezone.utc)
@@ -237,7 +238,7 @@ class MasterDataClient:
             "deadline": deadline.isoformat(),
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
-            "graph_nodes": {},
+            "graph_nodes": {"correlation_id": correlation_id} if correlation_id else {},
         }
         if SKILL_MODE == "stub":
             pr["_created_ts"] = time.time()
