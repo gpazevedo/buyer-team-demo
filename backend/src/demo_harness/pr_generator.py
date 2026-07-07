@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from test_tenant_app.clients.master_data_client import master_data_client
 
@@ -41,7 +42,14 @@ def build_pr(quadrant: str, quantity: int = 1) -> dict:
         }
     ]
 
-    logger.info("submitting PR sku=%s quadrant=%s quantity=%d", item_def["sku"], quadrant, quantity)
+    correlation_id = str(uuid4())
+    logger.info(
+        "submitting PR sku=%s quadrant=%s quantity=%d correlation_id=%s",
+        item_def["sku"],
+        quadrant,
+        quantity,
+        correlation_id,
+    )
     pr = master_data_client.create_pr(
         tenant_id=TENANT_ID,
         items=items,
@@ -49,6 +57,7 @@ def build_pr(quadrant: str, quantity: int = 1) -> dict:
         delivery_threshold_days=item_def["lead_time_days"],
         delivery_ideal_days=max(1, item_def["lead_time_days"] // 2),
         budget_limit=item_def["estimated_unit_price"] * quantity,
+        correlation_id=correlation_id,
     )
 
     # Compute the deterministic negotiation_id for the response
@@ -64,6 +73,7 @@ def build_pr(quadrant: str, quantity: int = 1) -> dict:
     return {
         "requisition_id": pr["requisition_id"],
         "negotiation_id": negotiation_id,
+        "correlation_id": correlation_id,
         "tenant_id": TENANT_ID,
         "quadrant": quadrant,
         "item": {

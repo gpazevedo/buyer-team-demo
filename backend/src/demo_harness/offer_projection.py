@@ -22,6 +22,11 @@ from demo_harness.config import (
     TENANT_ID,
 )
 
+# DynamoDB calls run in threads to avoid blocking the event loop. A hung
+# thread permanently occupies the default thread pool, which starves sync
+# endpoints (uvicorn runs those on the same pool). Cap each call at 5 s.
+_DDB_THREAD_TIMEOUT = 5.0
+
 logger = logging.getLogger("demo_harness.offer_projection")
 
 # In-memory projection: negotiation_id -> {suppliers, offers, invitations, status}
@@ -29,6 +34,18 @@ _state: dict[str, dict] = {}
 
 # SSE subscribers: {negotiation_id: [asyncio.Queue]}
 _subscribers: dict[str, list[asyncio.Queue]] = {}
+
+# Track published event IDs to prevent duplicates from concurrent poll_once callers.
+_published_statuses: dict[str, str] = {}
+_published_awards: set[str] = set()
+_published_orders: set[str] = set()
+_published_offers: set[str] = set()
+_published_invites: set[str] = set()
+_published_feedback: set[str] = set()
+_published_classifications: set[str] = set()
+_synthetic_order_ids: set[str] = set()  # tracked in-memory since DynamoDB drops origin field
+_synthetic_neg_ids: set[str] = set()  # prevent duplicate synthetic orders per negotiation
+_correlation_ids: dict[str, str] = {}  # negotiation_id → correlation_id for end-to-end tracing
 _global_subscribers: list[asyncio.Queue] = []  # for all-negotiation listeners
 
 
@@ -45,6 +62,11 @@ def find_by_requisition_id(requisition_id: str) -> dict | None:
         if s.get("requisition_id") == requisition_id:
             return s
     return None
+
+
+def set_correlation_id(negotiation_id: str, correlation_id: str) -> None:
+    """Register a correlation ID for a negotiation (called at PR creation time)."""
+    _correlation_ids[negotiation_id] = correlation_id
 
 
 def subscribe(negotiation_id: str | None = None) -> asyncio.Queue:
@@ -105,16 +127,26 @@ def _query_negotiation(negotiation_id: str) -> dict | None:
     return neg
 
 
+def _fetch_dynamo_data(negotiation_id: str) -> tuple:
+    """Synchronous DynamoDB reads — run in thread to avoid blocking event loop."""
+    neg = _query_negotiation(negotiation_id)
+    bids = _query_bids(negotiation_id)
+    invitations = _query_communications(negotiation_id)
+    feedback = _query_feedback(negotiation_id)
+    names = _supplier_name_map(TENANT_ID)
+    return neg, bids, invitations, feedback, names
+
+
 async def poll_once(negotiation_id: str) -> dict | None:
     """Poll all data sources for one negotiation; update projection state.
     Returns the updated state dict, or None if nothing changed.
     """
     try:
-        neg = _query_negotiation(negotiation_id)
-        bids = _query_bids(negotiation_id)
-        invitations = _query_communications(negotiation_id)
-        feedback = _query_feedback(negotiation_id)
-    except Exception:
+        neg, bids, invitations, feedback, names = await asyncio.wait_for(
+            asyncio.to_thread(_fetch_dynamo_data, negotiation_id),
+            timeout=_DDB_THREAD_TIMEOUT,
+        )
+    except (asyncio.TimeoutError, Exception):
         logger.exception("poll failed for %s", negotiation_id)
         return None
 
@@ -123,6 +155,52 @@ async def poll_once(negotiation_id: str) -> dict | None:
 
     prev = _state.get(negotiation_id, {})
     prev_bids = prev.get("bids", [])
+
+    # Fetch awards + orders early so they can be included in the state saved
+    # before event publishing — prevents concurrent poll_once callers from
+    # seeing incomplete state (missing award_ids/order_ids).
+    requisition_id = neg.get("requisition_id") if neg else None
+    if requisition_id:
+        try:
+            current_awards = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
+        except (asyncio.TimeoutError, Exception):
+            current_awards = []
+        try:
+            current_orders_all = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_orders, TENANT_ID),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
+            current_orders_list = [
+                o for o in current_orders_all if o.get("requisition_id") == requisition_id
+            ]
+        except (asyncio.TimeoutError, Exception):
+            current_orders_list = []
+        # If real (orchestrator) orders exist, delete any synthetic duplicates
+        real_orders = [o for o in current_orders_list if o["order_id"] not in _synthetic_order_ids]
+        synthetic_orders = [o for o in current_orders_list if o["order_id"] in _synthetic_order_ids]
+        if real_orders and synthetic_orders:
+            for syn in synthetic_orders:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _live_table("test-tenant-orders").delete_item,
+                            Key={"pk": f"{TENANT_ID}#{syn['order_id']}", "sk": "metadata"},
+                        ),
+                        timeout=_DDB_THREAD_TIMEOUT,
+                    )
+                    _synthetic_order_ids.discard(syn["order_id"])
+                    logger.info("removed stale synthetic order %s", syn["order_id"])
+                except (asyncio.TimeoutError, Exception):
+                    pass
+            current_orders_list = real_orders
+    else:
+        current_awards = []
+        current_orders_list = []
+    current_award_ids = {a["award_id"] for a in current_awards if a.get("award_id")}
+    current_order_ids = {o["order_id"] for o in current_orders_list if o.get("order_id")}
 
     # Detect new RFQ invitations
     prev_invite_ids = {
@@ -133,6 +211,10 @@ async def poll_once(negotiation_id: str) -> dict | None:
     if new_invite_ids:
         for invite in invitations:
             if invite["communication_id"] in new_invite_ids:
+                cid = invite["communication_id"]
+                if cid in _published_invites:
+                    continue
+                _published_invites.add(cid)
                 logger.info(
                     "rfq sent negotiation=%s supplier=%s",
                     negotiation_id,
@@ -143,7 +225,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     {
                         "event": "rfq_sent",
                         "negotiation_id": negotiation_id,
-                        "communication_id": invite.get("communication_id"),
+                        "communication_id": cid,
                         "supplier_id": invite.get("supplier_id"),
                         "supplier_name": invite.get("supplier_name"),
                         "created_at": invite.get("created_at"),
@@ -158,7 +240,11 @@ async def poll_once(negotiation_id: str) -> dict | None:
     new_feedback_ids = current_feedback_ids - prev_feedback_ids
     if new_feedback_ids:
         for f in feedback:
-            if f["communication_id"] in new_feedback_ids:
+            if (
+                f["communication_id"] in new_feedback_ids
+                and f["communication_id"] not in _published_feedback
+            ):
+                _published_feedback.add(f["communication_id"])
                 logger.info(
                     "auction round feedback negotiation=%s supplier=%s rank=%s",
                     negotiation_id,
@@ -180,9 +266,10 @@ async def poll_once(negotiation_id: str) -> dict | None:
     }
     new_priced_ids = {fp[0] for fp in current_priced - prev_priced}
 
-    names = _supplier_name_map(TENANT_ID)
     for b in bids:
-        b.setdefault("supplier_name", names.get(b.get("supplier_id")))
+        b["supplier_name"] = (
+            b.get("supplier_name") or names.get(b.get("supplier_id")) or b.get("supplier_id")
+        )
 
     # For strategies that bypass the agent (auto-priced SPOT_BID/COMPETITIVE_AUCTION),
     # no BID_INVITATION communications exist — derive supplier info from bids instead
@@ -197,7 +284,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     "communication_id": f"auto-{sid}",
                     "type": "BID_INVITATION",
                     "supplier_id": sid,
-                    "supplier_name": b.get("supplier_name", sid),
+                    "supplier_name": b.get("supplier_name") or names.get(sid, sid),
                     "created_at": b.get("created_at") or b.get("priced_at"),
                 }
                 invitations.append(invite)
@@ -231,6 +318,9 @@ async def poll_once(negotiation_id: str) -> dict | None:
         "invitations": invitations,
         "feedback": feedback,
         "bids": bids,
+        "award_ids": list(current_award_ids),
+        "order_ids": list(current_order_ids),
+        "correlation_id": _correlation_ids.get(negotiation_id, ""),
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
     }
     _state[negotiation_id] = state
@@ -244,9 +334,11 @@ async def poll_once(negotiation_id: str) -> dict | None:
         prev_strategy = prev.get("strategy")
         cur_quadrant = neg.get("kraljic_quadrant")
         cur_strategy = neg.get("strategy")
-        if (cur_quadrant and cur_quadrant != prev_quadrant) or (
-            cur_strategy and cur_strategy != prev_strategy
+        if negotiation_id not in _published_classifications and (
+            (cur_quadrant and cur_quadrant != prev_quadrant)
+            or (cur_strategy and cur_strategy != prev_strategy)
         ):
+            _published_classifications.add(negotiation_id)
             logger.info(
                 "classification defined negotiation=%s quadrant=%s strategy=%s",
                 negotiation_id,
@@ -268,8 +360,11 @@ async def poll_once(negotiation_id: str) -> dict | None:
 
     # 3) Offer received (newly priced bids)
     for bid_id in new_priced_ids:
+        if bid_id in _published_offers:
+            continue
         bid = next((b for b in bids if b["bid_id"] == bid_id), None)
         if bid:
+            _published_offers.add(bid_id)
             logger.info(
                 "offer received negotiation=%s supplier=%s amount=%s source=%s",
                 negotiation_id,
@@ -295,18 +390,13 @@ async def poll_once(negotiation_id: str) -> dict | None:
                 },
             )
 
-    # 4) Award issued
+    # 4) Award issued (uses awards/orders fetched earlier)
     prev_award_ids: set[str] = set(prev.get("award_ids", []))
-    current_awards = (
-        dynamo_client.get_awards(TENANT_ID, neg["requisition_id"])
-        if neg and neg.get("requisition_id")
-        else []
-    )
-    current_award_ids = {a["award_id"] for a in current_awards if a.get("award_id")}
     new_award_ids = current_award_ids - prev_award_ids
     if new_award_ids:
         for a in current_awards:
-            if a["award_id"] in new_award_ids:
+            if a["award_id"] in new_award_ids and a["award_id"] not in _published_awards:
+                _published_awards.add(a["award_id"])
                 logger.info(
                     "award issued negotiation=%s award_id=%s supplier=%s amount=%s",
                     negotiation_id,
@@ -325,30 +415,34 @@ async def poll_once(negotiation_id: str) -> dict | None:
                         "savings_amount": a.get("savings_amount"),
                     },
                 )
-    state["award_ids"] = list(current_award_ids)
 
     # ── Synthetic order ─────────────────────────────────────────────────
     # The orchestrator completes without writing to {env}-test-tenant-orders
     # (the award_comms node is skipped for auto-priced flows, and the normal
     # PO export path is async).  Create a synthetic order so the demo UI
     # shows the PO step.  The next poll cycle detects it and fires po_issued.
-    if neg and neg.get("status") in ("COMPLETED", "AUTO_APPROVED") and current_award_ids:
-        if not prev.get("order_ids") and not state.get("order_ids"):
+    if neg and neg.get("status") == "APPROVED" and current_award_ids:
+        if negotiation_id not in _synthetic_neg_ids and not current_orders_list:
             winning_award = current_awards[0] if current_awards else None
             if winning_award:
+                # Award may not have supplier_name populated yet — fall back to lookup
+                supplier_name = (
+                    winning_award.get("supplier_name")
+                    or names.get(winning_award.get("supplier_id"))
+                    or winning_award.get("supplier_id", "")
+                )
                 order_id = str(uuid4())
+                # Mark BEFORE the await so concurrent poll_once callers see the guard.
+                _synthetic_order_ids.add(order_id)
+                _synthetic_neg_ids.add(negotiation_id)
                 po_payload = {
                     "order_id": order_id,
                     "requisition_id": neg["requisition_id"],
                     "tenant_id": TENANT_ID,
                     "supplier": {
                         "supplier_id": winning_award.get("supplier_id", ""),
-                        "name": winning_award.get(
-                            "supplier_name", winning_award.get("supplier_id")
-                        ),
-                        "supplier_name": winning_award.get(
-                            "supplier_name", winning_award.get("supplier_id")
-                        ),
+                        "name": supplier_name,
+                        "supplier_name": supplier_name,
                     },
                     "award": {
                         "award_id": winning_award.get("award_id", ""),
@@ -360,19 +454,24 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     "status": "ISSUED",
                 }
                 try:
-                    _live_table("test-tenant-orders").put_item(
-                        Item={
-                            "pk": f"{TENANT_ID}#{order_id}",
-                            "sk": "metadata",
-                            "order_id": order_id,
-                            "requisition_id": neg["requisition_id"],
-                            "tenant_id": TENANT_ID,
-                            "purchase_order": json.dumps(po_payload),
-                            "reception_status": "PENDING",
-                            "supplier_name": po_payload["supplier"]["name"],
-                            "total_value": str(po_payload["total_price"]),
-                            "created_at": datetime.now(tz=timezone.utc).isoformat(),
-                        }
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _live_table("test-tenant-orders").put_item,
+                            Item={
+                                "pk": f"{TENANT_ID}#{order_id}",
+                                "sk": "metadata",
+                                "order_id": order_id,
+                                "requisition_id": neg["requisition_id"],
+                                "tenant_id": TENANT_ID,
+                                "purchase_order": json.dumps(po_payload),
+                                "reception_status": "PENDING",
+                                "supplier_name": po_payload["supplier"]["name"],
+                                "total_value": str(po_payload["total_price"]),
+                                "origin": "demo-harness",
+                                "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                            },
+                        ),
+                        timeout=_DDB_THREAD_TIMEOUT,
                     )
                     logger.info(
                         "synthetic order created negotiation=%s order_id=%s total=%s",
@@ -380,22 +479,17 @@ async def poll_once(negotiation_id: str) -> dict | None:
                         order_id,
                         po_payload["total_value"],
                     )
-                except Exception:
+                except (asyncio.TimeoutError, Exception):
                     logger.exception("failed to create synthetic order for %s", negotiation_id)
 
-    # 5) PO issued
+    # 5) PO issued (reuses current_orders_list fetched above with awards)
     prev_order_ids: set[str] = set(prev.get("order_ids", []))
-    current_orders = (
-        dynamo_client.get_orders(TENANT_ID) if neg and neg.get("requisition_id") else []
-    )
-    current_orders = [
-        o for o in current_orders if o.get("requisition_id") == neg.get("requisition_id")
-    ]
-    current_order_ids = {o["order_id"] for o in current_orders if o.get("order_id")}
+    current_order_ids = {o["order_id"] for o in current_orders_list if o.get("order_id")}
     new_order_ids = current_order_ids - prev_order_ids
     if new_order_ids:
-        for o in current_orders:
-            if o["order_id"] in new_order_ids:
+        for o in current_orders_list:
+            if o["order_id"] in new_order_ids and o["order_id"] not in _published_orders:
+                _published_orders.add(o["order_id"])
                 logger.info(
                     "po issued negotiation=%s order_id=%s total=%s",
                     negotiation_id,
@@ -416,24 +510,27 @@ async def poll_once(negotiation_id: str) -> dict | None:
     state["order_ids"] = list(current_order_ids)
 
     # 6) Status change (last — represents the final state of this poll)
-    prev_status = prev.get("status")
-    if neg and neg.get("status") != prev_status:
+    cur_status = neg.get("status") if neg else None
+    if cur_status and cur_status != _published_statuses.get(negotiation_id):
+        prev_status = _published_statuses.get(negotiation_id)
+        _published_statuses[negotiation_id] = cur_status
         logger.info(
             "status change negotiation=%s %s -> %s",
             negotiation_id,
             prev_status,
-            neg.get("status"),
+            cur_status,
         )
         await _publish(
             negotiation_id,
             {
                 "event": "status_change",
                 "negotiation_id": negotiation_id,
-                "status": neg.get("status"),
+                "status": cur_status,
                 "previous_status": prev_status,
             },
         )
 
+    _state[negotiation_id] = state
     return state
 
 
