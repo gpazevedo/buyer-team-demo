@@ -148,7 +148,13 @@ def _normalize_award(a: dict, names: dict[str, str]) -> dict:
 
 # AWARDED is the orchestrator's terminal negotiation status; the app enum tops out
 # at COMPLETED. Map the orchestrator vocabulary onto the contract.
-_NEG_STATUS = {"AWARDED": "COMPLETED", "ACTIVE": "IN_PROGRESS", "NEGOTIATING": "IN_PROGRESS"}
+# AUTO_APPROVED means the approval gate passed without HITL — map to APPROVED.
+_NEG_STATUS = {
+    "AWARDED": "COMPLETED",
+    "ACTIVE": "IN_PROGRESS",
+    "NEGOTIATING": "IN_PROGRESS",
+    "AUTO_APPROVED": "APPROVED",
+}
 
 
 def _normalize_negotiation(n: dict, names: dict[str, str]) -> dict:
