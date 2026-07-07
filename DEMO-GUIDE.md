@@ -98,14 +98,14 @@ flowchart TD
 
     Offers --> SPOT{"SPOT_BID?"}
     SPOT -->|Yes: NON_CRITICAL| AutoOK["Self-approved<br>no HITL pause<br>(~30s total)"]
-    AutoOK --> Complete["COMPLETED<br>→ Award → PO"]
+    AutoOK --> Complete["COMPLETED<br>Award + PO issued"]
 
     SPOT -->|No| Auction{"COMPETITIVE<br>AUCTION?"}
     Auction -->|Yes: LEVERAGE| MultiRound["Multi-round auction<br>(suppliers revise bids)"]
     MultiRound --> Check5k{"Awarded<br>price > $5k?"}
     Check5k -->|"No (qty 1)"| AutoOK
     Check5k -->|"Yes (qty ≥3)"| HITL["PENDING_APPROVAL<br>yellow panel"]
-    HITL --> Approve["Approve"]
+    HITL --> Approve["APPROVED<br>(human or auto)"]
     HITL --> CycleBack["Cycle Back"]
     HITL --> Reject["Reject"]
     Approve --> Complete
@@ -117,7 +117,7 @@ flowchart TD
     Bottle -->|STRATEGIC| SoleSrc2["LLM-negotiated<br>partnership pricing"]
     SoleSrc1 --> HITL2["PENDING_APPROVAL<br>always HITL"]
     SoleSrc2 --> HITL2
-    HITL2 --> Approve2["Approve"]
+    HITL2 --> Approve2["APPROVED<br>(human)"]
     HITL2 --> CycleBack2["Cycle Back"]
     HITL2 --> Reject2["Reject"]
     Approve2 --> Complete
@@ -128,6 +128,8 @@ flowchart TD
     style AutoOK fill:#059669,color:#fff
     style HITL fill:#d97706,color:#fff
     style HITL2 fill:#d97706,color:#fff
+    style Approve fill:#7c3aed,color:#fff
+    style Approve2 fill:#7c3aed,color:#fff
     style Complete fill:#059669,color:#fff
     style Rejected fill:#dc2626,color:#fff
     style Rejected2 fill:#dc2626,color:#fff
