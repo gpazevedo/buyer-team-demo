@@ -165,10 +165,10 @@ second. No mock data — every update is the real orchestrator writing to `{env}
 8. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
 9. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
 
-**The status flow:**
+**The status flow** (normalized for the UI — raw orchestrator statuses are mapped by `dynamo_client._NEG_STATUS`):
 
 ```
-ACTIVE → NEGOTIATING → EVALUATING → PENDING_APPROVAL → APPROVED → AWARDED → COMPLETED
+PENDING → IN_PROGRESS → EVALUATING → PENDING_APPROVAL → APPROVED → COMPLETED
 ```
 
 Approximate duration per quadrant (with VPC/NAT up for LLM agents):
@@ -357,6 +357,10 @@ with savings accumulated across multiple strategies.
 | No invites/bids after 60s | VPC/NAT down (LLM agents can't reach Bedrock) | Resilience fallback kicks in automatically — bids arrive tagged `fallback_stub`; or restore VPC |
 | Timeline shows stale data from previous demo runs | Accumulated Blue Jets runtime data across multiple cycles | Run `uv run --package demo-harness python -m demo_harness.reset_demo` to clear runtime data while keeping seeds |
 | Timeline SSE disconnects | Backend restarted (--reload) | Refresh the page |
+| "Loading item info..." hangs on New PR tab | Backend event loop blocked by a hung DynamoDB call | Restart the backend (`kill` + re-run uvicorn); all DynamoDB calls now have 5 s timeouts via `asyncio.wait_for` |
+| Duplicate awards/POs shown in UI | Previously caused by missing `_state` save and race conditions in concurrent poll cycles | Fixed — backend idempotency guards prevent duplicate SSE events; frontend handlers deduplicate by ID |
+| Progress bar goes all-gray after PO issued | Raw orchestrator `AUTO_APPROVED` status wasn't normalized; ProgressBar didn't recognize it | Fixed — `AUTO_APPROVED` maps to `APPROVED` in `_NEG_STATUS` and is in the ProgressBar `statusOrder` |
+| Page lands on "New PR" tab after HITL approval | `window.location.reload()` reset all React state to defaults | Fixed — active tab and negotiation ID saved to `sessionStorage` before reload and restored on init |
 | Dashboard widgets show "No data" | No negotiations completed today, or the IAM role for the emitting component doesn't include the `procurement/business` namespace in its `cloudwatch:PutMetricData` condition | Submit a PR and let it finish — data appears within 30 seconds. If it doesn't, the IAM policy for that Lambda's role needs the namespace added (see `infra/modules/step-functions/main.tf` step-invoker policy or `infra/agent_runtimes.tf` agent-runtime policy) |
 
 ## Appendix: Console URLs (dev, us-east-1)
