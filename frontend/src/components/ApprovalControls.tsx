@@ -20,7 +20,20 @@ export default function ApprovalControls({ requisitionId, blockReason }: Props) 
         });
         const data = await res.json();
         console.log("[ApprovalControls] decision result", data);
-        setResult(`${decision}: ${JSON.stringify(data)}`);
+
+        // Gate was already resolved before our call arrived — the orchestrator
+        // already processed the decision. Reload to show current state.
+        if (data?.result?.status === "ALREADY_RESOLVED") {
+          window.location.reload();
+          return;
+        }
+
+        if (data?.result?.status === "ERROR") {
+          setResult(`${data.result.reason || "unknown error"}`);
+        } else {
+          // Approval succeeded — reload so the Timeline picks up the new state
+          window.location.reload();
+        }
       } catch (e) {
         console.error("[ApprovalControls] decision failed", e);
         setResult(`Error: ${e}`);

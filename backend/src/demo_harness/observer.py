@@ -95,13 +95,32 @@ async def get_negotiation(negotiation_id: str):
 async def stream_negotiation(negotiation_id: str):
     """SSE timeline — push node progress, offers, status changes."""
 
+    async def _read_awards_orders(requisition_id: str | None) -> tuple[list, list]:
+        if not requisition_id:
+            return [], []
+        awards, orders = [], []
+        try:
+            awards = dynamo_client.get_awards(TENANT_ID, requisition_id)
+        except Exception:
+            pass
+        try:
+            orders = dynamo_client.get_orders(TENANT_ID)
+            orders = [o for o in orders if o.get("requisition_id") == requisition_id]
+        except Exception:
+            pass
+        return awards, orders
+
     async def event_generator():
         q = subscribe(negotiation_id)
         try:
-            # Send initial snapshot
+            # Send initial snapshot (with awards + orders, same as GET endpoint)
             state = await poll_once(negotiation_id)
             if state:
-                yield {"event": "snapshot", "data": json.dumps(state, default=str)}
+                awards, orders = await _read_awards_orders(state.get("requisition_id"))
+                yield {
+                    "event": "snapshot",
+                    "data": json.dumps({**state, "awards": awards, "orders": orders}, default=str),
+                }
             else:
                 yield {"event": "waiting", "data": json.dumps({"negotiation_id": negotiation_id})}
 
@@ -151,7 +170,31 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
             )
         else:
             result = graph_client.cycle_back_award(TENANT_ID, requisition_id, approver)
-        logger.info("approval %s succeeded for %s: %s", decision, requisition_id, result)
+
+        # The gate may have already resolved (race: orchestrator moved past
+        # PENDING_APPROVAL before our Lambda invocation reached it). In that
+        # case verify the negotiation state — if it's moved past PENDING_APPROVAL,
+        # treat as success rather than surfacing an error to the user.
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "ERROR"
+            and result.get("reason") == "no_pending_approval"
+        ):
+            try:
+                state = poll_once(result.get("negotiation_id", ""))
+                if state and state.get("status") != "PENDING_APPROVAL":
+                    logger.info(
+                        "gate already resolved for %s — treating as approved", requisition_id
+                    )
+                    return {
+                        "status": "ok",
+                        "decision": decision,
+                        "result": {"status": "ALREADY_RESOLVED", "state": state},
+                    }
+            except Exception:
+                pass
+
+        logger.info("approval %s result for %s: %s", decision, requisition_id, result)
         return {"status": "ok", "decision": decision, "result": result}
     except Exception as e:
         logger.exception("approval %s failed for %s", decision, requisition_id)

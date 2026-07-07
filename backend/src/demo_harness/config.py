@@ -36,7 +36,7 @@ APPROVAL_GATE_FUNCTION = os.getenv(
 )
 
 # Poll intervals
-OBSERVER_POLL_SECONDS = int(os.getenv("OBSERVER_POLL_SECONDS", "2"))
+OBSERVER_POLL_SECONDS = int(os.getenv("OBSERVER_POLL_SECONDS", "1"))
 
 # Display-only; no server-side enforcement (PRD-020 v1.2.0 §5.2.4)
 DEFAULT_DEADLINE_MINUTES = int(os.getenv("DEFAULT_DEADLINE_MINUTES", "5"))

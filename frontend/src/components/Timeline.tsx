@@ -9,9 +9,18 @@ type NegotiationState = {
   quadrant: string | null;
   strategy: string | null;
   approval_block_reason: string | null;
+  invitations: Invitation[];
   bids: Bid[];
   awards: Award[];
   orders: Order[];
+};
+
+type Invitation = {
+  communication_id: string;
+  type: string;
+  supplier_id: string;
+  supplier_name: string;
+  created_at?: string | number;
 };
 
 type Bid = {
@@ -84,6 +93,20 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         const evt = JSON.parse(e.data);
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
+        if (evt.event === "rfq_sent") {
+          setState((prev) => prev && evt.supplier_id && !prev.invitations?.some(
+            (i) => i.supplier_id === evt.supplier_id
+          ) ? {
+            ...prev,
+            invitations: [...(prev.invitations || []), {
+              communication_id: evt.communication_id || `rfq-${evt.supplier_id}`,
+              type: "BID_INVITATION",
+              supplier_id: evt.supplier_id,
+              supplier_name: evt.supplier_name,
+              created_at: evt.created_at,
+            }],
+          } : prev);
+        }
         if (evt.event === "offer_received") {
           setState((prev) => prev ? {
             ...prev,
@@ -136,6 +159,12 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
             }],
           } : prev);
         }
+        if (evt.event === "status_change") {
+          setState((prev) => prev ? { ...prev, status: evt.status } : prev);
+        }
+        if (evt.event === "classification_defined") {
+          setState((prev) => prev ? { ...prev, quadrant: evt.quadrant, strategy: evt.strategy } : prev);
+        }
         // Refresh state on updates
         fetch(`/demo/negotiations/${negotiationId}`)
           .then((r) => r.json())
@@ -152,7 +181,7 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
     };
   }, [negotiationId]);
 
-  // Polling fallback: refresh state every 3s so the UI stays in sync even
+  // Polling fallback: refresh state every 1s so the UI stays in sync even
   // if SSE events are missed (the SSE stream has no guaranteed delivery).
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   useEffect(() => {
@@ -162,7 +191,7 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         .then((r) => r.json())
         .then(setState)
         .catch(() => {});
-    }, 3000);
+    }, 1000);
     return () => clearInterval(pollRef.current);
   }, [negotiationId]);
 
@@ -210,6 +239,45 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         <div className="mb-8">
           <ProgressBar status={state.status} />
         </div>
+      )}
+
+      {/* Strategy Classification */}
+      {state?.quadrant && state?.strategy && (
+        <section className="mb-8">
+          <h3 className="text-lg font-semibold mb-3">Strategy Classification</h3>
+          <div className="p-4 rounded-lg bg-gray-800 border border-cyan-800">
+            <div className="flex items-center gap-3">
+              <span className={`px-2 py-1 rounded border text-sm font-medium ${
+                state.quadrant === "NON_CRITICAL" ? "bg-green-900/50 text-green-300 border-green-700" :
+                state.quadrant === "LEVERAGE" ? "bg-blue-900/50 text-blue-300 border-blue-700" :
+                state.quadrant === "BOTTLENECK" ? "bg-amber-900/50 text-amber-300 border-amber-700" :
+                state.quadrant === "STRATEGIC" ? "bg-red-900/50 text-red-300 border-red-700" :
+                "bg-gray-700 text-gray-300 border-gray-600"
+              }`}>
+                {state.quadrant}
+              </span>
+              <span className="text-gray-400 text-sm">→</span>
+              <span className="text-cyan-300 font-mono text-sm font-medium">{state.strategy}</span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* RFQ Sent */}
+      {state?.invitations && state.invitations.length > 0 && (
+        <section className="mb-8">
+          <h3 className="text-lg font-semibold mb-3">Suppliers Invited</h3>
+          <div className="flex flex-wrap gap-2">
+            {state.invitations.map((inv) => (
+              <span
+                key={inv.supplier_id}
+                className="px-3 py-1.5 rounded-lg bg-blue-900/30 border border-blue-800 text-sm text-blue-300"
+              >
+                {inv.supplier_name}
+              </span>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Bids / Offers */}
@@ -313,7 +381,7 @@ function ProgressBar({ status }: { status: string | null }) {
         return (
           <div key={step.key} className="flex items-center gap-1 flex-1">
             <div className={`flex-1 h-1.5 rounded-full ${done ? "bg-blue-500" : active ? "bg-blue-400 animate-pulse" : "bg-gray-700"}`} />
-            <span className={`text-[10px] whitespace-nowrap ${done ? "text-blue-400" : active ? "text-blue-300" : "text-gray-600"}`}>
+            <span className={`text-xs whitespace-nowrap ${done ? "text-blue-400" : active ? "text-blue-300" : "text-gray-600"}`}>
               {step.label}
             </span>
           </div>

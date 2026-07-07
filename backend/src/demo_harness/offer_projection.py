@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from boto3.dynamodb.conditions import Key
 from test_tenant_app.clients.ddb import table as _live_table
@@ -36,6 +37,14 @@ def get_state(negotiation_id: str | None = None) -> dict | list[dict]:
     if negotiation_id:
         return _state.get(negotiation_id)
     return list(_state.values())
+
+
+def find_by_requisition_id(requisition_id: str) -> dict | None:
+    """Find a negotiation state by its requisition ID."""
+    for s in _state.values():
+        if s.get("requisition_id") == requisition_id:
+            return s
+    return None
 
 
 def subscribe(negotiation_id: str | None = None) -> asyncio.Queue:
@@ -134,6 +143,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     {
                         "event": "rfq_sent",
                         "negotiation_id": negotiation_id,
+                        "communication_id": invite.get("communication_id"),
                         "supplier_id": invite.get("supplier_id"),
                         "supplier_name": invite.get("supplier_name"),
                         "created_at": invite.get("created_at"),
@@ -174,6 +184,24 @@ async def poll_once(negotiation_id: str) -> dict | None:
     for b in bids:
         b.setdefault("supplier_name", names.get(b.get("supplier_id")))
 
+    # For strategies that bypass the agent (auto-priced SPOT_BID/COMPETITIVE_AUCTION),
+    # no BID_INVITATION communications exist — derive supplier info from bids instead.
+    if not invitations and bids:
+        seen = set()
+        for b in bids:
+            sid = b.get("supplier_id")
+            if sid and sid not in seen:
+                seen.add(sid)
+                invitations.append(
+                    {
+                        "communication_id": f"auto-{sid}",
+                        "type": "BID_INVITATION",
+                        "supplier_id": sid,
+                        "supplier_name": b.get("supplier_name", sid),
+                        "created_at": b.get("created_at") or b.get("priced_at"),
+                    }
+                )
+
     state = {
         "negotiation_id": negotiation_id,
         "requisition_id": neg.get("requisition_id") if neg else None,
@@ -188,36 +216,67 @@ async def poll_once(negotiation_id: str) -> dict | None:
     }
     _state[negotiation_id] = state
 
-    # Publish events for newly issued POs
-    prev_order_ids: set[str] = set(prev.get("order_ids", []))
-    current_orders = (
-        dynamo_client.get_orders(TENANT_ID) if neg and neg.get("requisition_id") else []
-    )
-    current_order_ids = {o["order_id"] for o in current_orders if o.get("order_id")}
-    new_order_ids = current_order_ids - prev_order_ids
-    if new_order_ids:
-        for o in current_orders:
-            if o["order_id"] in new_order_ids:
-                logger.info(
-                    "po issued negotiation=%s order_id=%s total=%s",
-                    negotiation_id,
-                    o["order_id"],
-                    o.get("total_value"),
-                )
-                await _publish(
-                    negotiation_id,
-                    {
-                        "event": "po_issued",
-                        "negotiation_id": negotiation_id,
-                        "order_id": o["order_id"],
-                        "supplier_name": o.get("supplier_name"),
-                        "total_value": o.get("total_value"),
-                        "status": o.get("status"),
-                    },
-                )
-    state["order_ids"] = list(current_order_ids)
+    # Publish events in chronological order so the frontend renders each
+    # step naturally even when multiple events fire in a single poll cycle.
 
-    # Publish events for newly issued awards
+    # 1) Classification change (quadrant / strategy) — earliest step
+    if neg:
+        prev_quadrant = prev.get("quadrant")
+        prev_strategy = prev.get("strategy")
+        cur_quadrant = neg.get("kraljic_quadrant")
+        cur_strategy = neg.get("strategy")
+        if (cur_quadrant and cur_quadrant != prev_quadrant) or (
+            cur_strategy and cur_strategy != prev_strategy
+        ):
+            logger.info(
+                "classification defined negotiation=%s quadrant=%s strategy=%s",
+                negotiation_id,
+                cur_quadrant,
+                cur_strategy,
+            )
+            await _publish(
+                negotiation_id,
+                {
+                    "event": "classification_defined",
+                    "negotiation_id": negotiation_id,
+                    "quadrant": cur_quadrant,
+                    "strategy": cur_strategy,
+                },
+            )
+
+    # 2) RFQ sent (supplier invitations)
+    # (detected earlier — events from that block fire here)
+
+    # 3) Offer received (newly priced bids)
+    for bid_id in new_priced_ids:
+        bid = next((b for b in bids if b["bid_id"] == bid_id), None)
+        if bid:
+            logger.info(
+                "offer received negotiation=%s supplier=%s amount=%s source=%s",
+                negotiation_id,
+                bid.get("supplier_name") or bid.get("supplier_id"),
+                bid.get("amount") or bid.get("total_amount"),
+                bid.get("source"),
+            )
+            await _publish(
+                negotiation_id,
+                {
+                    "event": "offer_received",
+                    "negotiation_id": negotiation_id,
+                    "bid_id": bid.get("bid_id"),
+                    "supplier_id": bid.get("supplier_id"),
+                    "supplier_name": bid.get("supplier_name"),
+                    "amount": bid.get("amount") or bid.get("total_amount"),
+                    "unit_price": bid.get("unit_price"),
+                    "delivery_days": bid.get("delivery_days"),
+                    "currency": bid.get("currency"),
+                    "source": bid.get("source"),
+                    "status": bid.get("status"),
+                    "evaluation_rank": bid.get("evaluation_rank"),
+                },
+            )
+
+    # 4) Award issued
     prev_award_ids: set[str] = set(prev.get("award_ids", []))
     current_awards = (
         dynamo_client.get_awards(TENANT_ID, neg["requisition_id"])
@@ -249,61 +308,95 @@ async def poll_once(negotiation_id: str) -> dict | None:
                 )
     state["award_ids"] = list(current_award_ids)
 
-    # Publish events for newly priced bids
-    for bid_id in new_priced_ids:
-        bid = next((b for b in bids if b["bid_id"] == bid_id), None)
-        if bid:
-            logger.info(
-                "offer received negotiation=%s supplier=%s amount=%s source=%s",
-                negotiation_id,
-                bid.get("supplier_name") or bid.get("supplier_id"),
-                bid.get("amount") or bid.get("total_amount"),
-                bid.get("source"),
-            )
-            await _publish(
-                negotiation_id,
-                {
-                    "event": "offer_received",
-                    "negotiation_id": negotiation_id,
-                    "bid_id": bid.get("bid_id"),
-                    "supplier_id": bid.get("supplier_id"),
-                    "supplier_name": bid.get("supplier_name"),
-                    "amount": bid.get("amount") or bid.get("total_amount"),
-                    "unit_price": bid.get("unit_price"),
-                    "delivery_days": bid.get("delivery_days"),
-                    "currency": bid.get("currency"),
-                    "source": bid.get("source"),
-                    "status": bid.get("status"),
-                    "evaluation_rank": bid.get("evaluation_rank"),
-                },
-            )
+    # ── Synthetic order ─────────────────────────────────────────────────
+    # The orchestrator completes without writing to {env}-test-tenant-orders
+    # (the award_comms node is skipped for auto-priced flows, and the normal
+    # PO export path is async).  Create a synthetic order so the demo UI
+    # shows the PO step.  The next poll cycle detects it and fires po_issued.
+    if neg and neg.get("status") in ("COMPLETED", "AUTO_APPROVED") and current_award_ids:
+        if not prev.get("order_ids") and not state.get("order_ids"):
+            winning_award = current_awards[0] if current_awards else None
+            if winning_award:
+                order_id = str(uuid4())
+                po_payload = {
+                    "order_id": order_id,
+                    "requisition_id": neg["requisition_id"],
+                    "tenant_id": TENANT_ID,
+                    "supplier": {
+                        "supplier_id": winning_award.get("supplier_id", ""),
+                        "name": winning_award.get(
+                            "supplier_name", winning_award.get("supplier_id")
+                        ),
+                        "supplier_name": winning_award.get(
+                            "supplier_name", winning_award.get("supplier_id")
+                        ),
+                    },
+                    "award": {
+                        "award_id": winning_award.get("award_id", ""),
+                        "total_amount": float(winning_award.get("total_amount", 0) or 0),
+                        "savings_amount": float(winning_award.get("savings_amount", 0) or 0),
+                    },
+                    "total_price": float(winning_award.get("total_amount", 0) or 0),
+                    "currency": winning_award.get("currency", "USD"),
+                    "status": "ISSUED",
+                }
+                try:
+                    _live_table("test-tenant-orders").put_item(
+                        Item={
+                            "pk": f"{TENANT_ID}#{order_id}",
+                            "sk": "metadata",
+                            "order_id": order_id,
+                            "requisition_id": neg["requisition_id"],
+                            "tenant_id": TENANT_ID,
+                            "purchase_order": json.dumps(po_payload),
+                            "reception_status": "PENDING",
+                            "supplier_name": po_payload["supplier"]["name"],
+                            "total_value": str(po_payload["total_price"]),
+                            "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                        }
+                    )
+                    logger.info(
+                        "synthetic order created negotiation=%s order_id=%s total=%s",
+                        negotiation_id,
+                        order_id,
+                        po_payload["total_value"],
+                    )
+                except Exception:
+                    logger.exception("failed to create synthetic order for %s", negotiation_id)
 
-    # Publish classification change (quadrant / strategy)
-    if neg:
-        prev_quadrant = prev.get("quadrant")
-        prev_strategy = prev.get("strategy")
-        cur_quadrant = neg.get("kraljic_quadrant")
-        cur_strategy = neg.get("strategy")
-        if (cur_quadrant and cur_quadrant != prev_quadrant) or (
-            cur_strategy and cur_strategy != prev_strategy
-        ):
-            logger.info(
-                "classification defined negotiation=%s quadrant=%s strategy=%s",
-                negotiation_id,
-                cur_quadrant,
-                cur_strategy,
-            )
-            await _publish(
-                negotiation_id,
-                {
-                    "event": "classification_defined",
-                    "negotiation_id": negotiation_id,
-                    "quadrant": cur_quadrant,
-                    "strategy": cur_strategy,
-                },
-            )
+    # 5) PO issued
+    prev_order_ids: set[str] = set(prev.get("order_ids", []))
+    current_orders = (
+        dynamo_client.get_orders(TENANT_ID) if neg and neg.get("requisition_id") else []
+    )
+    current_orders = [
+        o for o in current_orders if o.get("requisition_id") == neg.get("requisition_id")
+    ]
+    current_order_ids = {o["order_id"] for o in current_orders if o.get("order_id")}
+    new_order_ids = current_order_ids - prev_order_ids
+    if new_order_ids:
+        for o in current_orders:
+            if o["order_id"] in new_order_ids:
+                logger.info(
+                    "po issued negotiation=%s order_id=%s total=%s",
+                    negotiation_id,
+                    o["order_id"],
+                    o.get("total_value"),
+                )
+                await _publish(
+                    negotiation_id,
+                    {
+                        "event": "po_issued",
+                        "negotiation_id": negotiation_id,
+                        "order_id": o["order_id"],
+                        "supplier_name": o.get("supplier_name"),
+                        "total_value": o.get("total_value"),
+                        "status": o.get("status"),
+                    },
+                )
+    state["order_ids"] = list(current_order_ids)
 
-    # Publish status change
+    # 6) Status change (last — represents the final state of this poll)
     prev_status = prev.get("status")
     if neg and neg.get("status") != prev_status:
         logger.info(
