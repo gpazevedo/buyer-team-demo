@@ -15,6 +15,9 @@ uv sync
 
 # Seed Blue Jets tenant (idempotent — safe to re-run if already seeded)
 uv run --package demo-harness python -m demo_harness.seed
+
+# Reset any previous demo runtime data (idempotent — safe to run anytime)
+uv run --package demo-harness python -m demo_harness.reset_demo
 ```
 
 **Start the backend** (one shell):
@@ -35,7 +38,7 @@ pnpm dev          # → http://localhost:5174
 
 **Open the AWS dashboard** in a browser tab:
 
-```
+```url
 https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business
 ```
 
@@ -54,6 +57,22 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashbo
 
 ---
 
+## Resetting between demo sessions
+
+Each demo PR→PO cycle writes records across 9 DynamoDB tables. To start fresh:
+
+```bash
+uv run --package demo-harness python -m demo_harness.reset_demo
+```
+
+This deletes all Blue Jets runtime data (negotiations, bids, awards, requisitions, orders,
+communications, session cache) while **preserving seed data** (tenant, categories, items,
+suppliers). No need to re-seed after a reset — you're ready to submit the next PR immediately.
+
+Run it before each demo session to avoid stale data in the Timeline or Suppliers tabs.
+
+---
+
 ## Demo Walkthrough
 
 ### 1. Create a PR from the UI
@@ -69,7 +88,53 @@ Four Kraljic quadrants are available, each driving a different orchestrator path
 | Bottleneck | VHF COMM transceiver ($11,800) | PARTNERSHIP_RISK | Always pauses for HITL approval. Block reason reads "STRATEGIC_APPROVAL_REQUIRED". |
 | Strategic | HPT stage-1 blade set ($96,000) | PARTNERSHIP_VALUE | Always pauses for HITL. Highest value — best savings story. |
 
+**Flow per strategy:**
+
+```mermaid
+flowchart TD
+    PR["PR Submitted<br>via UI or API"] --> Classify["Classification<br>(quadrant + strategy detected)"]
+    Classify --> RFQ["RFQ sent<br>(suppliers invited to bid)"]
+    RFQ --> Offers["Offers received<br>(agent-priced or resilience fallback)"]
+
+    Offers --> SPOT{"SPOT_BID?"}
+    SPOT -->|Yes: NON_CRITICAL| AutoOK["Self-approved<br>no HITL pause<br>(~30s total)"]
+    AutoOK --> Complete["COMPLETED<br>→ Award → PO"]
+
+    SPOT -->|No| Auction{"COMPETITIVE<br>AUCTION?"}
+    Auction -->|Yes: LEVERAGE| MultiRound["Multi-round auction<br>(suppliers revise bids)"]
+    MultiRound --> Check5k{"Awarded<br>price > $5k?"}
+    Check5k -->|"No (qty 1)"| AutoOK
+    Check5k -->|"Yes (qty ≥3)"| HITL["PENDING_APPROVAL<br>yellow panel"]
+    HITL --> Approve["Approve"]
+    HITL --> CycleBack["Cycle Back"]
+    HITL --> Reject["Reject"]
+    Approve --> Complete
+    CycleBack -.->|"re-evaluate"| Offers
+    Reject --> Rejected["REJECTED<br>no PO created"]
+
+    Auction -->|No| Bottle{"BOTTLENECK<br>or STRATEGIC?"}
+    Bottle -->|BOTTLENECK| SoleSrc1["Sole-source<br>non-agent pricing"]
+    Bottle -->|STRATEGIC| SoleSrc2["LLM-negotiated<br>partnership pricing"]
+    SoleSrc1 --> HITL2["PENDING_APPROVAL<br>always HITL"]
+    SoleSrc2 --> HITL2
+    HITL2 --> Approve2["Approve"]
+    HITL2 --> CycleBack2["Cycle Back"]
+    HITL2 --> Reject2["Reject"]
+    Approve2 --> Complete
+    CycleBack2 -.->|"re-evaluate"| Offers
+    Reject2 --> Rejected2["REJECTED<br>no PO created"]
+
+    style PR fill:#2563eb,color:#fff
+    style AutoOK fill:#059669,color:#fff
+    style HITL fill:#d97706,color:#fff
+    style HITL2 fill:#d97706,color:#fff
+    style Complete fill:#059669,color:#fff
+    style Rejected fill:#dc2626,color:#fff
+    style Rejected2 fill:#dc2626,color:#fff
+```
+
 **Verification via the API** (useful mid-demo):
+
 ```bash
 # Check what's running
 curl -s localhost:8000/demo/health | python3 -m json.tool
@@ -84,21 +149,24 @@ curl -s localhost:8000/demo/negotiations/{negotiation_id} | python3 -m json.tool
 ### 2. Watch the negotiation evolve in real time
 
 After submitting a PR, the **Timeline** tab opens an SSE stream to the backend's
-`offer_projection` poll loop, which reads from the real DynamoDB tables every 2
-seconds. No mock data — every update is the real orchestrator writing to `{env}-bids`,
+`offer_projection` poll loop, which reads from the real DynamoDB tables every 1
+second. No mock data — every update is the real orchestrator writing to `{env}-bids`,
 `{env}-communications`, and the `{env}-negotiations` domain table.
 
 **What you see, in order:**
 
 1. **Progress bar** — light-blue filled segments advance: Ingest → Strategy → Evaluate → Approval → Award → PO Issued. The active segment pulses.
 2. **Quadrant + strategy badges** — e.g. `STRATEGIC` (red) + `PARTNERSHIP_VALUE`.
-3. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
-4. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
-5. **Award** — green card with awarded supplier, total amount, and savings.
-6. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
-7. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
+3. **Invitations sent** — supplier names appear as they are invited to bid. Auto-priced strategies (SPOT_BID, COMPETITIVE_AUCTION) show synthetic invitations derived from bid data since the orchestrator bypasses the agent.
+4. **Auction Round Feedback** — for multi-round auction strategies, rank/feedback updates appear after each round.
+5. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
+6. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
+7. **Award** — green card with awarded supplier, total amount, and savings.
+8. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
+9. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
 
 **The status flow:**
+
 ```
 ACTIVE → NEGOTIATING → EVALUATING → PENDING_APPROVAL → APPROVED → AWARDED → COMPLETED
 ```
@@ -287,10 +355,9 @@ with savings accumulated across multiple strategies.
 | "Buyer Team unreachable" in header | Seed missing or tables not deployed | Run `uv run --package demo-harness python -m demo_harness.seed`; check `terraform apply` |
 | 404 on negotiation after PR submit | PR created but orchestrator hasn't started processing yet | Wait 5-10s and refresh the Timeline tab |
 | No invites/bids after 60s | VPC/NAT down (LLM agents can't reach Bedrock) | Resilience fallback kicks in automatically — bids arrive tagged `fallback_stub`; or restore VPC |
+| Timeline shows stale data from previous demo runs | Accumulated Blue Jets runtime data across multiple cycles | Run `uv run --package demo-harness python -m demo_harness.reset_demo` to clear runtime data while keeping seeds |
 | Timeline SSE disconnects | Backend restarted (--reload) | Refresh the page |
 | Dashboard widgets show "No data" | No negotiations completed today, or the IAM role for the emitting component doesn't include the `procurement/business` namespace in its `cloudwatch:PutMetricData` condition | Submit a PR and let it finish — data appears within 30 seconds. If it doesn't, the IAM policy for that Lambda's role needs the namespace added (see `infra/modules/step-functions/main.tf` step-invoker policy or `infra/agent_runtimes.tf` agent-runtime policy) |
-
-
 
 ## Appendix: Console URLs (dev, us-east-1)
 

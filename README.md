@@ -25,6 +25,7 @@ It observes and drives the real orchestrator through its existing seams only:
 backend/src/demo_harness/
   config.py           env-driven settings (table names, tenant id, poll interval)
   seed.py             idempotent Blue Jets tenant/category/item/supplier seed
+  reset_demo.py       idempotent Blue Jets runtime data cleanup (keeps seed data)
   pr_generator.py     builds + submits a PR for a given Kraljic quadrant
   offer_projection.py background poll loop + in-memory per-negotiation projection
   observer.py         FastAPI routes: negotiation snapshot/stream, approve, requisitions, suppliers
@@ -58,6 +59,9 @@ uv sync
 # 1. Seed the Blue Jets tenant (idempotent — safe to re-run)
 uv run --package demo-harness python -m demo_harness.seed
 # or once the backend is up: curl -X POST localhost:8000/demo/seed
+
+# 1b. (Optional) Reset runtime data from prior demo cycles
+uv run --package demo-harness python -m demo_harness.reset_demo
 
 # 2. Backend
 cd demo-harness-project/backend
@@ -120,7 +124,7 @@ elsewhere (see `backend/src/demo_harness/config.py`):
 | `AWS_REGION` | `us-east-1` | |
 | `SKILL_MODE` | `live` | `test_tenant_app` clients read this at import time — must be `live` for real AWS calls |
 | `APPROVAL_GATE_FUNCTION` | `{ENV}-buyer-team-node6-approval-gate` | HITL release target |
-| `OBSERVER_POLL_SECONDS` | `2` | background projection poll interval |
+| `OBSERVER_POLL_SECONDS` | `1` | background projection poll interval |
 
 ## Notes / known limits
 
