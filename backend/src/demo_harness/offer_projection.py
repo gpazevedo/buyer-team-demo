@@ -185,22 +185,41 @@ async def poll_once(negotiation_id: str) -> dict | None:
         b.setdefault("supplier_name", names.get(b.get("supplier_id")))
 
     # For strategies that bypass the agent (auto-priced SPOT_BID/COMPETITIVE_AUCTION),
-    # no BID_INVITATION communications exist — derive supplier info from bids instead.
+    # no BID_INVITATION communications exist — derive supplier info from bids instead
+    # and publish the rfq_sent event so the frontend shows the supplier invitation step.
     if not invitations and bids:
         seen = set()
         for b in bids:
             sid = b.get("supplier_id")
             if sid and sid not in seen:
                 seen.add(sid)
-                invitations.append(
-                    {
-                        "communication_id": f"auto-{sid}",
-                        "type": "BID_INVITATION",
-                        "supplier_id": sid,
-                        "supplier_name": b.get("supplier_name", sid),
-                        "created_at": b.get("created_at") or b.get("priced_at"),
-                    }
-                )
+                invite = {
+                    "communication_id": f"auto-{sid}",
+                    "type": "BID_INVITATION",
+                    "supplier_id": sid,
+                    "supplier_name": b.get("supplier_name", sid),
+                    "created_at": b.get("created_at") or b.get("priced_at"),
+                }
+                invitations.append(invite)
+                # Also fire rfq_sent for auto-derived invitations (missed by the
+                # DynamoDB-based detection above since no BID_INVITATION record exists).
+                if invite["communication_id"] not in prev_invite_ids:
+                    logger.info(
+                        "rfq sent (auto-derived) negotiation=%s supplier=%s",
+                        negotiation_id,
+                        invite.get("supplier_name") or invite.get("supplier_id"),
+                    )
+                    await _publish(
+                        negotiation_id,
+                        {
+                            "event": "rfq_sent",
+                            "negotiation_id": negotiation_id,
+                            "communication_id": invite["communication_id"],
+                            "supplier_id": sid,
+                            "supplier_name": invite["supplier_name"],
+                            "created_at": invite["created_at"],
+                        },
+                    )
 
     state = {
         "negotiation_id": negotiation_id,
