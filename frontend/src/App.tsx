@@ -8,8 +8,14 @@ import BuyerTeamStatus from "./components/BuyerTeamStatus";
 type Tab = "pr" | "requisitions" | "timeline" | "suppliers";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("pr");
-  const [activeNegotiationId, setActiveNegotiationId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const saved = sessionStorage.getItem("demo:activeTab");
+    return (saved as Tab) || "pr";
+  });
+  const [activeNegotiationId, setActiveNegotiationId] = useState<string | null>(() => {
+    return sessionStorage.getItem("demo:negotiationId") || null;
+  });
+  const [initialQuadrant, setInitialQuadrant] = useState<string | null>(null);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "pr", label: "New PR" },
@@ -52,9 +58,10 @@ export default function App() {
       <main className="p-8">
         <Suspense fallback={<div className="text-gray-400">Loading...</div>}>
           {activeTab === "pr" && (
-            <PRForm onCreated={(negId) => {
+            <PRForm onCreated={(negId, quadrant) => {
               console.log("[App] PR created, switching to Timeline for negotiation", negId);
               setActiveNegotiationId(negId);
+              setInitialQuadrant(quadrant);
               setActiveTab("timeline");
             }} />
           )}
@@ -66,7 +73,7 @@ export default function App() {
             }} />
           )}
           {activeTab === "timeline" && (
-            <Timeline negotiationId={activeNegotiationId} />
+            <Timeline negotiationId={activeNegotiationId} initialQuadrant={initialQuadrant} />
           )}
           {activeTab === "suppliers" && <SupplierInbox />}
         </Suspense>

@@ -26,7 +26,13 @@ from test_tenant_app.clients.master_data_client import master_data_client
 
 from demo_harness.config import TENANT_ID
 from demo_harness.health import check_buyer_team
-from demo_harness.offer_projection import get_state, poll_once, subscribe, unsubscribe
+from demo_harness.offer_projection import (
+    _DDB_THREAD_TIMEOUT,
+    get_state,
+    poll_once,
+    subscribe,
+    unsubscribe,
+)
 
 logger = logging.getLogger("demo_harness.observer")
 router = APIRouter(prefix="/demo")
@@ -69,19 +75,25 @@ async def get_negotiation(negotiation_id: str):
         logger.info("negotiation %s not found (not yet started?)", negotiation_id)
         raise HTTPException(status_code=404, detail="Negotiation not found")
 
-    # Read awards + orders from Dynamo
+    # Read awards + orders from Dynamo (offloaded to thread to avoid blocking event loop)
     requisition_id = state.get("requisition_id")
     awards = []
     orders = []
     if requisition_id:
         try:
-            awards = dynamo_client.get_awards(TENANT_ID, requisition_id)
-        except Exception:
+            awards = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
+        except (asyncio.TimeoutError, Exception):
             pass
         try:
-            orders = dynamo_client.get_orders(TENANT_ID)
+            orders = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_orders, TENANT_ID),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
             orders = [o for o in orders if o.get("requisition_id") == requisition_id]
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             pass
 
     return {
@@ -100,13 +112,19 @@ async def stream_negotiation(negotiation_id: str):
             return [], []
         awards, orders = [], []
         try:
-            awards = dynamo_client.get_awards(TENANT_ID, requisition_id)
-        except Exception:
+            awards = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
+        except (asyncio.TimeoutError, Exception):
             pass
         try:
-            orders = dynamo_client.get_orders(TENANT_ID)
+            orders = await asyncio.wait_for(
+                asyncio.to_thread(dynamo_client.get_orders, TENANT_ID),
+                timeout=_DDB_THREAD_TIMEOUT,
+            )
             orders = [o for o in orders if o.get("requisition_id") == requisition_id]
-        except Exception:
+        except (asyncio.TimeoutError, Exception):
             pass
         return awards, orders
 

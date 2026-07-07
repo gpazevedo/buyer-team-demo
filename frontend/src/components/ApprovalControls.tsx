@@ -31,7 +31,10 @@ export default function ApprovalControls({ requisitionId, blockReason }: Props) 
         if (data?.result?.status === "ERROR") {
           setResult(`${data.result.reason || "unknown error"}`);
         } else {
-          // Approval succeeded — reload so the Timeline picks up the new state
+          // Approval succeeded — reload so the Timeline picks up the new state.
+          // Preserve the current tab in sessionStorage so the user lands back on
+          // the Timeline instead of the default "New PR" tab.
+          sessionStorage.setItem("demo:activeTab", "timeline");
           window.location.reload();
         }
       } catch (e) {
