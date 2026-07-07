@@ -57,13 +57,14 @@ const QUADRANT_COLORS: Record<string, string> = {
   STRATEGIC: "bg-red-900/50 text-red-300 border-red-700",
 };
 
-export default function Timeline({ negotiationId }: { negotiationId: string | null }) {
+export default function Timeline({ negotiationId, initialQuadrant }: { negotiationId: string | null; initialQuadrant: string | null }) {
   const [state, setState] = useState<NegotiationState | null>(null);
   const [events, setEvents] = useState<string[]>([]);
 
   useEffect(() => {
     if (!negotiationId) return;
 
+    sessionStorage.setItem("demo:negotiationId", negotiationId);
     console.log("[Timeline] watching negotiation", negotiationId);
 
     // Initial snapshot
@@ -94,18 +95,21 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
         if (evt.event === "rfq_sent") {
-          setState((prev) => prev && evt.supplier_id && !prev.invitations?.some(
-            (i) => i.supplier_id === evt.supplier_id
-          ) ? {
-            ...prev,
-            invitations: [...(prev.invitations || []), {
-              communication_id: evt.communication_id || `rfq-${evt.supplier_id}`,
-              type: "BID_INVITATION",
-              supplier_id: evt.supplier_id,
-              supplier_name: evt.supplier_name,
-              created_at: evt.created_at,
-            }],
-          } : prev);
+          setState((prev) => {
+            if (!prev || !evt.supplier_id) return prev;
+            if (prev.invitations?.some((i) => i.supplier_id === evt.supplier_id))
+              return prev;
+            return {
+              ...prev,
+              invitations: [...(prev.invitations || []), {
+                communication_id: evt.communication_id || `rfq-${evt.supplier_id}`,
+                type: "BID_INVITATION",
+                supplier_id: evt.supplier_id,
+                supplier_name: evt.supplier_name,
+                created_at: evt.created_at,
+              }],
+            };
+          });
         }
         if (evt.event === "offer_received") {
           setState((prev) => prev ? {
@@ -138,26 +142,34 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
           } : prev);
         }
         if (evt.event === "award_issued") {
-          setState((prev) => prev ? {
-            ...prev,
-            awards: [...(prev.awards || []), {
-              award_id: evt.award_id,
-              supplier_name: evt.supplier_name,
-              total_amount: evt.total_amount,
-              savings_amount: evt.savings_amount,
-            }],
-          } : prev);
+          setState((prev) => prev ? (prev.awards || []).some((a) => a.award_id === evt.award_id)
+            ? prev
+            : {
+              ...prev,
+              awards: [...(prev.awards || []), {
+                award_id: evt.award_id,
+                supplier_name: evt.supplier_name,
+                total_amount: evt.total_amount,
+                savings_amount: evt.savings_amount,
+              }],
+            }
+          : prev);
         }
         if (evt.event === "po_issued") {
-          setState((prev) => prev ? {
-            ...prev,
-            orders: [...(prev.orders || []), {
-              order_id: evt.order_id,
-              supplier_name: evt.supplier_name,
-              total_value: evt.total_value,
-              status: evt.status || "ISSUED",
-            }],
-          } : prev);
+          setState((prev) => {
+            if (!prev || !evt.order_id) return prev;
+            if (prev.orders?.some((o) => o.order_id === evt.order_id))
+              return prev;
+            return {
+              ...prev,
+              orders: [...(prev.orders || []), {
+                order_id: evt.order_id,
+                supplier_name: evt.supplier_name,
+                total_value: evt.total_value,
+                status: evt.status || "ISSUED",
+              }],
+            };
+          });
         }
         if (evt.event === "status_change") {
           setState((prev) => prev ? { ...prev, status: evt.status } : prev);
@@ -242,22 +254,31 @@ export default function Timeline({ negotiationId }: { negotiationId: string | nu
       )}
 
       {/* Strategy Classification */}
-      {state?.quadrant && state?.strategy && (
+      {(state?.quadrant || initialQuadrant) && (
         <section className="mb-8">
           <h3 className="text-lg font-semibold mb-3">Strategy Classification</h3>
           <div className="p-4 rounded-lg bg-gray-800 border border-cyan-800">
             <div className="flex items-center gap-3">
               <span className={`px-2 py-1 rounded border text-sm font-medium ${
-                state.quadrant === "NON_CRITICAL" ? "bg-green-900/50 text-green-300 border-green-700" :
-                state.quadrant === "LEVERAGE" ? "bg-blue-900/50 text-blue-300 border-blue-700" :
-                state.quadrant === "BOTTLENECK" ? "bg-amber-900/50 text-amber-300 border-amber-700" :
-                state.quadrant === "STRATEGIC" ? "bg-red-900/50 text-red-300 border-red-700" :
+                (state?.quadrant || initialQuadrant) === "NON_CRITICAL" ? "bg-green-900/50 text-green-300 border-green-700" :
+                (state?.quadrant || initialQuadrant) === "LEVERAGE" ? "bg-blue-900/50 text-blue-300 border-blue-700" :
+                (state?.quadrant || initialQuadrant) === "BOTTLENECK" ? "bg-amber-900/50 text-amber-300 border-amber-700" :
+                (state?.quadrant || initialQuadrant) === "STRATEGIC" ? "bg-red-900/50 text-red-300 border-red-700" :
                 "bg-gray-700 text-gray-300 border-gray-600"
               }`}>
-                {state.quadrant}
+                {state?.quadrant || initialQuadrant}
               </span>
-              <span className="text-gray-400 text-sm">→</span>
-              <span className="text-cyan-300 font-mono text-sm font-medium">{state.strategy}</span>
+              {state?.strategy ? (
+                <>
+                  <span className="text-gray-400 text-sm">→</span>
+                  <span className="text-cyan-300 font-mono text-sm font-medium">{state.strategy}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-gray-400 text-sm">→</span>
+                  <span className="text-gray-500 font-mono text-sm animate-pulse">classifying...</span>
+                </>
+              )}
             </div>
           </div>
         </section>
@@ -370,7 +391,7 @@ function ProgressBar({ status }: { status: string | null }) {
   // Backend normalizes orchestrator statuses (dynamo_client.py _NEG_STATUS):
   //   ACTIVE/NEGOTIATING → IN_PROGRESS, AWARDED → COMPLETED
   // Other statuses (EVALUATING, PENDING_APPROVAL, APPROVED) pass through.
-  const statusOrder = ["PENDING", "IN_PROGRESS", "EVALUATING", "PENDING_APPROVAL", "APPROVED", "COMPLETED"];
+  const statusOrder = ["PENDING", "IN_PROGRESS", "EVALUATING", "PENDING_APPROVAL", "APPROVED", "AUTO_APPROVED", "COMPLETED"];
   const currentIdx = status ? statusOrder.indexOf(status) : 0;
 
   return (

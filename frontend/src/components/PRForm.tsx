@@ -23,7 +23,7 @@ type PRResult = {
   created_at: string;
 };
 
-export default function PRForm({ onCreated }: { onCreated: (negId: string) => void }) {
+export default function PRForm({ onCreated }: { onCreated: (negId: string, quadrant: string) => void }) {
   const [quadrant, setQuadrant] = useState("NON_CRITICAL");
   const [quantity, setQuantity] = useState(1);
   const [itemPreview, setItemPreview] = useState<ItemPreview | null>(null);
@@ -56,7 +56,7 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string) => vo
       }
       const data = await res.json();
       console.log("[PRForm] PR created", data);
-      onCreated(data.negotiation_id);
+      onCreated(data.negotiation_id, quadrant);
       return data;
     },
     null

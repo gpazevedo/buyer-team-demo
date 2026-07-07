@@ -13,11 +13,14 @@ It observes and drives the real orchestrator through its existing seams only:
   store is what starts the real DynamoDB-Stream → `pr_event_router` → Step Functions
   chain — this harness never calls `StartExecution` directly.
 - **Observation** — polls `{env}-negotiations` / `{env}-bids` / `{env}-communications`
-  every `OBSERVER_POLL_SECONDS` and pushes changes over SSE. Read-only; never writes
+  every 1 second and pushes changes over SSE. All DynamoDB I/O runs in `asyncio.to_thread()`
+  with 5 s timeouts to avoid blocking the uvicorn event loop. Read-only; never writes
   to `{env}-bids`.
 - **HITL approval** — reuses `test_tenant_app`'s `GraphClient`, which releases a paused
   Approval Gate via a direct `boto3 lambda.invoke` of the Node 6 Lambda. There is no
   HTTP approval API in the orchestrator.
+  After approval, the tab and negotiation ID are preserved across the page reload via
+  `sessionStorage` so the user lands back on the Timeline.
 
 ## Layout
 
@@ -25,6 +28,7 @@ It observes and drives the real orchestrator through its existing seams only:
 backend/src/demo_harness/
   config.py           env-driven settings (table names, tenant id, poll interval)
   seed.py             idempotent Blue Jets tenant/category/item/supplier seed
+  reset_demo.py       idempotent Blue Jets runtime data cleanup (keeps seed data)
   pr_generator.py     builds + submits a PR for a given Kraljic quadrant
   offer_projection.py background poll loop + in-memory per-negotiation projection
   observer.py         FastAPI routes: negotiation snapshot/stream, approve, requisitions, suppliers
@@ -58,6 +62,9 @@ uv sync
 # 1. Seed the Blue Jets tenant (idempotent — safe to re-run)
 uv run --package demo-harness python -m demo_harness.seed
 # or once the backend is up: curl -X POST localhost:8000/demo/seed
+
+# 1b. (Optional) Reset runtime data from prior demo cycles
+uv run --package demo-harness python -m demo_harness.reset_demo
 
 # 2. Backend
 cd demo-harness-project/backend
@@ -120,7 +127,7 @@ elsewhere (see `backend/src/demo_harness/config.py`):
 | `AWS_REGION` | `us-east-1` | |
 | `SKILL_MODE` | `live` | `test_tenant_app` clients read this at import time — must be `live` for real AWS calls |
 | `APPROVAL_GATE_FUNCTION` | `{ENV}-buyer-team-node6-approval-gate` | HITL release target |
-| `OBSERVER_POLL_SECONDS` | `2` | background projection poll interval |
+| `OBSERVER_POLL_SECONDS` | `1` | background projection poll interval |
 
 ## Notes / known limits
 
@@ -129,6 +136,21 @@ elsewhere (see `backend/src/demo_harness/config.py`):
   back to deterministic pricing (bids tagged `source: <strategy>_fallback_stub`) and
   the rest of the lifecycle (ingest → classify → evaluate → approve → PO) still runs
   to completion — just without real LLM-negotiated offers.
+- **Synthetic POs for auto-priced flows.** When the orchestrator skips the
+  `award_comms` node (auto-approved strategies), the demo harness creates a synthetic
+  Purchase Order so the UI shows a PO step. If a real orchestrator order arrives later,
+  the synthetic is automatically deleted. The PO section always shows the canonical
+  order.
+- **Status normalization.** The orchestrator writes raw statuses (`ACTIVE`, `AWARDED`,
+  `AUTO_APPROVED`); the `dynamo_client` normalizes them to the app contract
+  (`ACTIVE`→`IN_PROGRESS`, `AWARDED`→`COMPLETED`, `AUTO_APPROVED`→`APPROVED`).
+- **Idempotent SSE events.** All 7 event types (`classification_defined`, `rfq_sent`,
+  `auction_round_feedback`, `offer_received`, `award_issued`, `po_issued`,
+  `status_change`) have backend idempotency guards — concurrent poll cycles cannot
+  produce duplicate events.
+- **Strategy Classification** appears immediately on PR submission (before the backend
+  confirms), showing the selected quadrant with a pulsing "classifying..." label until
+  the strategy name arrives.
 - Single PO per negotiation today — per-supplier PO grouping isn't implemented in the
   orchestrator yet (see PRD-020 §3.6).
 - No persisted `deadline` field; `DEFAULT_DEADLINE_MINUTES` is display-only.
