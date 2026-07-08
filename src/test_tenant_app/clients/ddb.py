@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 from functools import cache
+from typing import Any, overload
 
 import boto3
 
@@ -41,6 +42,14 @@ def to_decimal(obj):
     return obj
 
 
+@overload
+def to_native(obj: list) -> list: ...
+@overload
+def to_native(obj: dict) -> dict: ...
+@overload
+def to_native(obj: Decimal) -> int | float: ...
+@overload
+def to_native(obj: Any) -> Any: ...
 def to_native(obj):
     """Recursively convert DynamoDB Decimals back to int/float for Pydantic/JSON."""
     if isinstance(obj, Decimal):
