@@ -167,7 +167,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
             asyncio.to_thread(_fetch_dynamo_data, negotiation_id),
             timeout=_DDB_THREAD_TIMEOUT,
         )
-    except (asyncio.TimeoutError, Exception):
+    except asyncio.TimeoutError, Exception:
         logger.exception("poll failed for %s", negotiation_id)
         return None
 
@@ -187,7 +187,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                 asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
                 timeout=_DDB_THREAD_TIMEOUT,
             )
-        except (asyncio.TimeoutError, Exception):
+        except asyncio.TimeoutError, Exception:
             current_awards = []
         try:
             current_orders_all = await asyncio.wait_for(
@@ -197,7 +197,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
             current_orders_list = [
                 o for o in current_orders_all if o.get("requisition_id") == requisition_id
             ]
-        except (asyncio.TimeoutError, Exception):
+        except asyncio.TimeoutError, Exception:
             current_orders_list = []
         # If real (orchestrator) orders exist, delete any synthetic duplicates
         real_orders = [o for o in current_orders_list if o["order_id"] not in _synthetic_order_ids]
@@ -214,7 +214,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                     )
                     _synthetic_order_ids.discard(syn["order_id"])
                     logger.info("removed stale synthetic order %s", syn["order_id"])
-                except (asyncio.TimeoutError, Exception):
+                except asyncio.TimeoutError, Exception:
                     pass
             current_orders_list = real_orders
     else:
@@ -502,7 +502,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
                         order_id,
                         po_payload["total_value"],
                     )
-                except (asyncio.TimeoutError, Exception):
+                except asyncio.TimeoutError, Exception:
                     logger.exception("failed to create synthetic order for %s", negotiation_id)
 
     # 5) PO issued (reuses current_orders_list fetched above with awards)
