@@ -1,4 +1,4 @@
-type Bid = {
+export type Bid = {
   bid_id: string;
   supplier_id: string;
   supplier_name: string;

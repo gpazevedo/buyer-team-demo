@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import OfferCard from "./OfferCard";
+import OfferCard, { type Bid } from "./OfferCard";
 
 type Item = {
   item_id: string;
@@ -24,7 +24,7 @@ type NegotiationState = {
   quadrant: string | null;
   strategy: string | null;
   approval_block_reason: string | null;
-  bids: any[];
+  bids: Bid[];
   awards: { award_id: string; supplier_name: string; total_amount: number }[];
   orders: { order_id: string; supplier_name: string; total_value: number }[];
 };
