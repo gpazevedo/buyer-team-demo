@@ -37,6 +37,7 @@ const baseSnapshot = {
   quadrant: "LEVERAGE",
   strategy: "COMPETITIVE_AUCTION",
   approval_block_reason: null as string | null,
+  total_cost_usd: null as number | null,
   invitations: [] as unknown[],
   bids: [] as unknown[],
   awards: [] as unknown[],
@@ -45,7 +46,7 @@ const baseSnapshot = {
 
 describe("Timeline", () => {
   let snapshot: typeof baseSnapshot;
-  let traces: { sfn: string | null; xray: string | null };
+  let traces: { sfn: string | null; xray: string | null; cost_dashboard: string | null };
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -55,7 +56,7 @@ describe("Timeline", () => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
     snapshot = { ...baseSnapshot };
-    traces = { sfn: null, xray: null };
+    traces = { sfn: null, xray: null, cost_dashboard: "https://example.com/cost-dashboard" };
 
     fetchMock = vi.fn((url: string) => {
       if (url.endsWith("/traces")) {
@@ -109,7 +110,7 @@ describe("Timeline", () => {
   it("stops polling for trace URLs once both SFN and X-Ray links are found", async () => {
     vi.useFakeTimers();
     try {
-      traces = { sfn: "https://example.com/sfn", xray: null };
+      traces = { sfn: "https://example.com/sfn", xray: null, cost_dashboard: "https://example.com/cost-dashboard" };
       render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
@@ -120,7 +121,11 @@ describe("Timeline", () => {
         String(c[0]).endsWith("/traces")
       ).length;
 
-      traces = { sfn: "https://example.com/sfn", xray: "https://example.com/xray" };
+      traces = {
+        sfn: "https://example.com/sfn",
+        xray: "https://example.com/xray",
+        cost_dashboard: "https://example.com/cost-dashboard",
+      };
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
       });
@@ -189,5 +194,21 @@ describe("Timeline", () => {
     // "Acme Corp" renders both in the offer card and the award section.
     expect((await screen.findAllByText("Acme Corp")).length).toBe(2);
     expect(screen.getByText("AWARDED")).toBeInTheDocument();
+  });
+
+  it("shows a placeholder for the cost badge before any agent call has priced tokens", async () => {
+    render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
+
+    expect(await screen.findByText("$$$")).toBeInTheDocument();
+    expect(screen.queryByText(/Est\. Cost/)).not.toBeInTheDocument();
+  });
+
+  it("shows the estimated cost as a link to the Cost Dashboard once available", async () => {
+    snapshot = { ...snapshot, total_cost_usd: 2.1445 };
+
+    render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
+
+    const link = await screen.findByText("Est. Cost: $2.14 ↗");
+    expect(link.closest("a")).toHaveAttribute("href", "https://example.com/cost-dashboard");
   });
 });

@@ -98,6 +98,29 @@ async def test_builds_snapshot_with_supplier_name_backfilled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_total_cost_usd_passed_through_when_present(monkeypatch):
+    nid = _fresh_negotiation_id()
+    _stub_reads(
+        monkeypatch,
+        neg={"requisition_id": "req-1", "status": "IN_PROGRESS", "total_cost_usd": 2.14},
+    )
+
+    state = await op.poll_once(nid)
+
+    assert state["total_cost_usd"] == 2.14
+
+
+@pytest.mark.asyncio
+async def test_total_cost_usd_is_none_before_any_agent_call(monkeypatch):
+    nid = _fresh_negotiation_id()
+    _stub_reads(monkeypatch, neg={"requisition_id": "req-1", "status": "PENDING"})
+
+    state = await op.poll_once(nid)
+
+    assert state["total_cost_usd"] is None
+
+
+@pytest.mark.asyncio
 async def test_existing_supplier_name_is_not_overwritten(monkeypatch):
     nid = _fresh_negotiation_id()
     _stub_reads(

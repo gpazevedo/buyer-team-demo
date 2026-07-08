@@ -26,7 +26,7 @@ from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.graph_client import graph_client
 from test_tenant_app.clients.master_data_client import master_data_client
 
-from demo_harness.config import AWS_REGION, TENANT_ID
+from demo_harness.config import AWS_REGION, ENV, TENANT_ID
 from demo_harness.health import check_buyer_team
 from demo_harness.offer_projection import (
     get_state,
@@ -213,8 +213,17 @@ def _trace_id_from_header(trace_header: str | None) -> str | None:
 
 @router.get("/negotiations/{negotiation_id}/traces")
 async def get_trace_urls(negotiation_id: str):
-    """Resolve SFN execution + X-Ray trace URLs for a negotiation."""
-    urls: dict = {"sfn": None, "xray": None}
+    """Resolve SFN execution + X-Ray trace URLs for a negotiation, plus the
+    (negotiation-agnostic) Cost Dashboard URL — same response since the
+    frontend already polls this endpoint for the trace-link row."""
+    urls: dict = {
+        "sfn": None,
+        "xray": None,
+        "cost_dashboard": (
+            f"https://{AWS_REGION}.console.aws.amazon.com"
+            f"/cloudwatch/home?region={AWS_REGION}#dashboards:name={ENV}-buyer-team-cost"
+        ),
+    }
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
     try:

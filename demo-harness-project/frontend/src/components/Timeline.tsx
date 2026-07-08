@@ -9,6 +9,7 @@ type NegotiationState = {
   quadrant: string | null;
   strategy: string | null;
   approval_block_reason: string | null;
+  total_cost_usd: number | null;
   invitations: Invitation[];
   bids: Bid[];
   awards: Award[];
@@ -60,7 +61,11 @@ const QUADRANT_COLORS: Record<string, string> = {
 export default function Timeline({ negotiationId, initialQuadrant }: { negotiationId: string | null; initialQuadrant: string | null }) {
   const [state, setState] = useState<NegotiationState | null>(null);
   const [events, setEvents] = useState<string[]>([]);
-  const [traceUrls, setTraceUrls] = useState<{ sfn: string | null; xray: string | null }>({ sfn: null, xray: null });
+  const [traceUrls, setTraceUrls] = useState<{ sfn: string | null; xray: string | null; cost_dashboard: string | null }>({
+    sfn: null,
+    xray: null,
+    cost_dashboard: null,
+  });
 
   useEffect(() => {
     if (!negotiationId) return;
@@ -74,11 +79,14 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
       fetch(`/demo/negotiations/${negotiationId}/traces`)
         .then((r) => r.json())
         .then((urls) => {
-          setTraceUrls((prev) => {
-            // Keep existing URLs, update with new ones
-            if (urls.sfn || urls.xray) return urls;
-            return prev;
-          });
+          // Each field keeps its last known value if this poll didn't
+          // resolve it (e.g. a transient describe_execution failure) —
+          // cost_dashboard is static so it always sticks from the first poll.
+          setTraceUrls((prev) => ({
+            sfn: urls.sfn || prev.sfn,
+            xray: urls.xray || prev.xray,
+            cost_dashboard: urls.cost_dashboard || prev.cost_dashboard,
+          }));
           if (urls.sfn && urls.xray) clearInterval(traceInterval);
         })
         .catch(() => {});
@@ -205,6 +213,25 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
               <span className="text-xs text-gray-600">
                 {traceUrls.sfn ? "X-Ray pending..." : "X-Ray"}
               </span>
+            )}
+          </span>
+          <span className="flex items-center gap-1">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                state?.total_cost_usd != null ? "bg-green-500" : "bg-gray-600"
+              }`}
+            />
+            {state?.total_cost_usd != null && traceUrls.cost_dashboard ? (
+              <a
+                href={traceUrls.cost_dashboard}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+              >
+                Est. Cost: ${state.total_cost_usd.toFixed(2)} ↗
+              </a>
+            ) : (
+              <span className="text-xs text-gray-600">$$$</span>
             )}
           </span>
         </div>

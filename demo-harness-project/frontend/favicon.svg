@@ -1,0 +1,37 @@
+<svg width="32" height="32" viewBox="0 0 80 80"
+     xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>Buyer Team</title>
+
+  <!-- Badge background -->
+  <rect x="4" y="4" width="72" height="72" rx="14" fill="#0F172A"/>
+
+  <!-- Subtle inner glow ring -->
+  <rect x="5" y="5" width="70" height="70" rx="13"
+        fill="none" stroke="#FFFFFF" stroke-width="0.6" opacity="0.08"/>
+
+  <!-- Bar 1 (left, ghost white) -->
+  <rect x="16.0" y="54.0" width="13" height="16"
+        rx="3" fill="#FFFFFF" opacity="0.35"/>
+
+  <!-- Bar 2 (middle, teal) -->
+  <rect x="34.0" y="41.0" width="13" height="29"
+        rx="3" fill="#0891B2"/>
+
+  <!-- Bar 3 (right, mint) -->
+  <rect x="51.0" y="23.0" width="13" height="47"
+        rx="3" fill="#14B8A6"/>
+
+  <!-- Connection arc through node tops -->
+  <path d="M 22.5 50.0 Q 40.0 36.0 57.5 19.0"
+        fill="none" stroke="#FFFFFF" stroke-width="1.4" opacity="0.3" stroke-linecap="round"/>
+
+  <!-- Node circles -->
+  <circle cx="22.5" cy="50.0" r="5.5" fill="#FFFFFF"/>
+  <circle cx="40.0"   cy="36.0" r="5.5" fill="#DBEAFE"/>
+  <circle cx="57.5" cy="19.0" r="5.5" fill="#FFFFFF"/>
+
+  <!-- Node center dots -->
+  <circle cx="22.5" cy="50.0" r="2.0" fill="#0F172A"/>
+  <circle cx="40.0"   cy="36.0" r="2.0" fill="#0891B2"/>
+  <circle cx="57.5" cy="19.0" r="2.0" fill="#14B8A6"/>
+</svg>
