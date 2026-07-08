@@ -4,6 +4,7 @@ import PRList from "./components/PRList";
 import Timeline from "./components/Timeline";
 import SupplierInbox from "./components/SupplierInbox";
 import BuyerTeamStatus from "./components/BuyerTeamStatus";
+import UtcClock from "./components/UtcClock";
 
 type Tab = "pr" | "requisitions" | "timeline" | "suppliers";
 
@@ -35,23 +36,26 @@ export default function App() {
               <BuyerTeamStatus />
             </div>
           </div>
-          <div className="flex gap-2">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => {
-                  console.log("[App] tab ->", t.id);
-                  setActiveTab(t.id);
-                }}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === t.id
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+          <div className="flex flex-col items-end gap-2">
+            <UtcClock />
+            <div className="flex gap-2">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    console.log("[App] tab ->", t.id);
+                    setActiveTab(t.id);
+                  }}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === t.id
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>

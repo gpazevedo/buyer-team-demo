@@ -336,6 +336,7 @@ async def poll_once(negotiation_id: str) -> dict | None:
         "quadrant": neg.get("kraljic_quadrant") if neg else None,
         "strategy": neg.get("strategy") if neg else None,
         "approval_block_reason": neg.get("approval_block_reason") if neg else None,
+        "total_cost_usd": neg.get("total_cost_usd") if neg else None,
         "invitations": invitations,
         "feedback": feedback,
         "bids": bids,
