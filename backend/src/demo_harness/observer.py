@@ -245,18 +245,12 @@ async def get_trace_urls(negotiation_id: str):
                 f"/states/home?region={os.getenv('AWS_REGION', 'us-east-1')}"
                 f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
             )
-            # Get trace ID from execution history (TaskStateExited events carry trace headers)
+            # Use describe_execution for start/end times (get_execution_history
+            # with maxResults only returns the tail, missing ExecutionStarted).
             try:
-                history = sfn.get_execution_history(
-                    executionArn=exec_arn, maxResults=5, reverseOrder=True
-                )
-                exec_start = None
-                exec_end = None
-                for evt in history["events"]:
-                    if evt["type"] == "ExecutionSucceeded":
-                        exec_end = evt["timestamp"]
-                    elif evt["type"] == "ExecutionStarted":
-                        exec_start = evt["timestamp"]
+                ex = sfn.describe_execution(executionArn=exec_arn)
+                exec_start = ex.get("startDate")
+                exec_end = ex.get("stopDate")
                 if exec_start and exec_end:
                     xray = boto3.client("xray", region_name=os.getenv("AWS_REGION", "us-east-1"))
                     # X-Ray indexing has sub-minute latency but the query window must be
