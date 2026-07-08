@@ -1,0 +1,96 @@
+# =============================================================================
+# Pre-Commit Configuration — Buyer Team Demo
+# =============================================================================
+# Runs locally on every commit so lint, format, type-check, and file hygiene
+# happen for free before code reaches CI.
+# Enable: uv sync && uv run pre-commit install
+# Run on demand: uv run pre-commit run --all-files
+# =============================================================================
+
+repos:
+  # Ruff — linter + formatter (replaces black, flake8, isort)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # Pyright — static type checker, always on. Run as a LOCAL hook via `uv run` so
+  # it uses the project venv (all imports resolvable) — the hosted pyright hook
+  # runs in an isolated env that can't see our deps. --all-packages syncs both
+  # workspace members (demo-harness, test-tenant-app), not just the root dev
+  # tooling group. Real type errors block; legacy loose-typing findings are
+  # warnings (see [tool.pyright] in pyproject.toml). CI runs the same command in
+  # the test job; the bare CI pre-commit job SKIPs it (no project venv there).
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (uv run --all-packages, project venv)
+        entry: uv run --all-packages pyright
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      # Lock the Dockerfile `FROM python:X.Y` base to the requires-python floor.
+      # check-ast/ruff run on the local 3.14 interpreter and can't see a
+      # base-image regression (e.g. the Dockerfile dropped back to 3.12 while
+      # code uses PEP 758); this guard fails on that drift. Triggers on
+      # Dockerfile or pyproject changes.
+      - id: python-version-sync
+        name: python version sync (Dockerfile <-> pyproject)
+        entry: uv run --no-project python scripts/check_python_version_sync.py
+        language: system
+        files: (Dockerfile|pyproject\.toml)$
+        pass_filenames: false
+
+  # General file-quality hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-case-conflict
+      - id: check-ast  # Python syntax
+
+  # actionlint — lint GitHub Actions workflows (.github/workflows/*.yml). Catches
+  # bad expressions, unknown contexts/keys, and shellcheck issues in `run:` blocks
+  # before CI. Only triggers when a workflow file changes.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+default_language_version:
+  python: python3.14
+
+# Skip generated / vendored / build trees
+exclude: |
+  (?x)^(
+    \.git/.*|
+    \.venv/.*|
+    .*/\.venv/.*|
+    __pycache__/.*|
+    .*/__pycache__/.*|
+    .*\.egg-info/.*|
+    .*/build/.*|
+    .*/dist/.*|
+    node_modules/.*|
+    .*/node_modules/.*|
+    .*/\.pytest_cache/.*
+  )$
+
+# Show every failing hook rather than stopping at the first.
+fail_fast: false
+
+minimum_pre_commit_version: '3.5.0'

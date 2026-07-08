@@ -41,7 +41,7 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string, quadr
   }, [quadrant]);
 
   const [result, submitAction, isPending] = useActionState<PRResult | null, FormData>(
-    async (_prev: PRResult | null, formData: FormData) => {
+    async (_prev: PRResult | null, _formData: FormData) => {
       console.log("[PRForm] submitting PR", { quadrant, quantity });
       const res = await fetch("/demo/requisitions", {
         method: "POST",

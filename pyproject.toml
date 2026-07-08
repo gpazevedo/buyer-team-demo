@@ -1,7 +1,43 @@
 [project]
 name = "buyer-team-demo"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.14"  # PEP 758 `except A, B:` is used; <=3.13 is a SyntaxError
+
+[dependency-groups]
+dev = [
+    "mypy-boto3-dynamodb>=1.43",  # type-only: demo_harness.reset_demo's TYPE_CHECKING import
+    "pre-commit>=4.6",
+    "pyright>=1.1.411",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+extend-exclude = ["**/build", "**/.venv", "**/dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]  # line length handled by the formatter, not enforced as a hard error
+
+[tool.pyright]
+# We deliberately do NOT depend on boto3-stubs: the stubs type every DynamoDB
+# item value as a broad union, which drowns real findings in idiom warnings.
+# Untyped boto3 keeps the signal on our own code.
+include = ["test_tenant_app/backend/src", "demo-harness-project/backend/src"]
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
+# Real errors stay errors (syntax, undefined names, missing imports). These
+# reflect untyped boto3/DynamoDB dict plumbing — kept visible as warnings
+# (non-blocking) rather than silenced outright.
+reportArgumentType = "warning"
+reportAttributeAccessIssue = "warning"
+reportIndexIssue = "warning"
+reportOptionalMemberAccess = "warning"
+reportCallIssue = "warning"
+reportOperatorIssue = "warning"
+reportGeneralTypeIssues = "warning"
+reportTypedDictNotRequiredAccess = "warning"
 
 [tool.uv]
 package = false

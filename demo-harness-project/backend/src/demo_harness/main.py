@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 # Set before importing test_tenant_app modules (they read SKILL_MODE at import time)
 os.environ.setdefault("SKILL_MODE", "live")
@@ -20,6 +21,7 @@ os.environ.setdefault("ENV", "dev")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from demo_harness.observer import router as demo_router
 from demo_harness.offer_projection import poll_loop
@@ -85,3 +87,13 @@ def get_seed_status():
 @app.get("/healthz", include_in_schema=False)
 def health():
     return {"status": "ok"}
+
+
+# ── Frontend static files ─────────────────────────────────────────
+# Only present when the frontend has been built (`pnpm build`, or the
+# container image). Local dev without a build keeps hitting the Vite dev
+# server on :5174 instead. Mounted last so it never shadows the API routes.
+
+_frontend_dist = Path(os.getenv("FRONTEND_DIST", "../frontend/dist"))
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
