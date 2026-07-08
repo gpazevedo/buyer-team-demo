@@ -290,6 +290,7 @@ dependencies = [
 dev = [
     { name = "httpx" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -299,6 +300,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=1.4.0" },
     { name = "sse-starlette", specifier = ">=2.2" },
     { name = "test-tenant-app", editable = "test_tenant_app/backend" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
