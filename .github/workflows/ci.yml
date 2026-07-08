@@ -19,6 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # pre-commit's own hook virtualenvs are built by `virtualenv`, which
+      # discovers interpreters via PATH — setup-uv's managed 3.14 isn't on
+      # PATH, so pre-commit/action can't find `python3.14`
+      # (default_language_version in .pre-commit-config.yaml). setup-python
+      # registers it on PATH; setup-uv below is still needed for `uv`.
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: "3.14"
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.14"
