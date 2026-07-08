@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 from uuid import NAMESPACE_DNS, uuid5
@@ -262,6 +263,32 @@ def seed_suppliers(ddb, env: str, cat_ids: dict[str, str]) -> dict[str, str]:
     return sup_ids
 
 
+def seed_governance_override(ddb, env: str) -> None:
+    """Blue Jets governance override: a $5k auto-approval ceiling (below the
+    shared `governance/default` profile's $10k) so the LEVERAGE demo quadrant
+    pauses for HITL once qty>=3 pushes the award over $5k."""
+    table = ddb.Table(f"{env}-system-config")
+    override = {
+        "approval_thresholds": {
+            "auto_approve_below_usd": 5000,
+            "escalation_timeout_hours": 48,
+            "require_second_approver_above_usd": 50000,
+            "negotiation_quality_composite_minimum": 0.67,
+        },
+    }
+    table.put_item(
+        Item={
+            "config_group": "governance",
+            "config_key": f"tenant#{TENANT_ID}",
+            "config_json": json.dumps(override),
+            "version": "1.0",
+        }
+    )
+    print(
+        f"[OK] {env}-system-config: governance tenant#{TENANT_ID} override (auto_approve_below_usd=5000)"
+    )
+
+
 def seed(env: str = ENV, region: str = REGION) -> dict:
     """Run the full Blue Jets seed. Idempotent — safe to re-run."""
     logger.info("seeding Blue Jets tenant env=%s region=%s", env, region)
@@ -270,6 +297,7 @@ def seed(env: str = ENV, region: str = REGION) -> dict:
     cat_ids = seed_categories(ddb, env)
     item_ids = seed_items(ddb, env, cat_ids)
     sup_ids = seed_suppliers(ddb, env, cat_ids)
+    seed_governance_override(ddb, env)
     logger.info(
         "seed complete tenant_id=%s categories=%d items=%d suppliers=%d",
         TENANT_ID,
