@@ -76,6 +76,19 @@ pnpm install
 pnpm dev   # http://localhost:5174, proxies /demo/* to :8000
 ```
 
+## Testing
+
+```bash
+# Backend (pytest — excludes tests/integration, which needs real AWS creds)
+cd demo-harness-project/backend
+uv run --extra dev pytest
+
+# Frontend (Vitest + React Testing Library)
+cd demo-harness-project/frontend
+pnpm install
+pnpm test
+```
+
 ## Creating a Purchase Requisition
 
 **Via the UI:** open `http://localhost:5174`, stay on the **New PR** tab, pick a Kraljic
