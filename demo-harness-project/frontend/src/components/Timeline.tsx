@@ -68,7 +68,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
     sessionStorage.setItem("demo:negotiationId", negotiationId);
     console.log("[Timeline] watching negotiation", negotiationId);
 
-    // Fetch trace URLs — X-Ray takes ~30-60s to index, poll until found
+    // Fetch trace URLs — X-Ray takes ~30-60s to index, poll until both are found
+    let traceInterval: ReturnType<typeof setInterval> | undefined;
     const fetchTraces = () => {
       fetch(`/demo/negotiations/${negotiationId}/traces`)
         .then((r) => r.json())
@@ -78,11 +79,12 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
             if (urls.sfn || urls.xray) return urls;
             return prev;
           });
+          if (urls.sfn && urls.xray) clearInterval(traceInterval);
         })
         .catch(() => {});
     };
     fetchTraces();
-    const traceInterval = setInterval(fetchTraces, 10000);
+    traceInterval = setInterval(fetchTraces, 10000);
 
     // Initial snapshot
     fetch(`/demo/negotiations/${negotiationId}`)
@@ -111,90 +113,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         const evt = JSON.parse(e.data);
         console.log("[Timeline] SSE update", evt);
         setEvents((prev) => [...prev.slice(-50), JSON.stringify(evt)]);
-        if (evt.event === "rfq_sent") {
-          setState((prev) => {
-            if (!prev || !evt.supplier_id) return prev;
-            if (prev.invitations?.some((i) => i.supplier_id === evt.supplier_id))
-              return prev;
-            return {
-              ...prev,
-              invitations: [...(prev.invitations || []), {
-                communication_id: evt.communication_id || `rfq-${evt.supplier_id}`,
-                type: "BID_INVITATION",
-                supplier_id: evt.supplier_id,
-                supplier_name: evt.supplier_name,
-                created_at: evt.created_at,
-              }],
-            };
-          });
-        }
-        if (evt.event === "offer_received") {
-          setState((prev) => prev ? {
-            ...prev,
-            bids: evt.bid_id && prev.bids?.some((b) => b.bid_id === evt.bid_id)
-              ? prev.bids.map((b) => b.bid_id === evt.bid_id ? {
-                  ...b,
-                  supplier_id: evt.supplier_id || b.supplier_id,
-                  supplier_name: evt.supplier_name || b.supplier_name,
-                  amount: evt.amount ?? b.amount,
-                  unit_price: evt.unit_price ?? b.unit_price,
-                  delivery_days: evt.delivery_days ?? b.delivery_days,
-                  currency: evt.currency || b.currency,
-                  source: evt.source || b.source,
-                  status: evt.status || b.status,
-                  evaluation_rank: evt.evaluation_rank ?? b.evaluation_rank,
-                } : b)
-              : [...(prev.bids || []), {
-                  bid_id: evt.bid_id,
-                  supplier_id: evt.supplier_id,
-                  supplier_name: evt.supplier_name,
-                  amount: evt.amount,
-                  unit_price: evt.unit_price,
-                  delivery_days: evt.delivery_days,
-                  currency: evt.currency,
-                  source: evt.source,
-                  status: evt.status,
-                  evaluation_rank: evt.evaluation_rank,
-                }],
-          } : prev);
-        }
-        if (evt.event === "award_issued") {
-          setState((prev) => prev ? (prev.awards || []).some((a) => a.award_id === evt.award_id)
-            ? prev
-            : {
-              ...prev,
-              awards: [...(prev.awards || []), {
-                award_id: evt.award_id,
-                supplier_name: evt.supplier_name,
-                total_amount: evt.total_amount,
-                savings_amount: evt.savings_amount,
-              }],
-            }
-          : prev);
-        }
-        if (evt.event === "po_issued") {
-          setState((prev) => {
-            if (!prev || !evt.order_id) return prev;
-            if (prev.orders?.some((o) => o.order_id === evt.order_id))
-              return prev;
-            return {
-              ...prev,
-              orders: [...(prev.orders || []), {
-                order_id: evt.order_id,
-                supplier_name: evt.supplier_name,
-                total_value: evt.total_value,
-                status: evt.status || "ISSUED",
-              }],
-            };
-          });
-        }
-        if (evt.event === "status_change") {
-          setState((prev) => prev ? { ...prev, status: evt.status } : prev);
-        }
-        if (evt.event === "classification_defined") {
-          setState((prev) => prev ? { ...prev, quadrant: evt.quadrant, strategy: evt.strategy } : prev);
-        }
-        // Refresh state on updates
+        // Refetch the full snapshot rather than patching state field-by-field —
+        // keeps a single source of truth and avoids racing the poll fallback below.
         fetch(`/demo/negotiations/${negotiationId}`)
           .then((r) => r.json())
           .then(setState)
@@ -211,7 +131,7 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
     };
   }, [negotiationId]);
 
-  // Polling fallback: refresh state every 1s so the UI stays in sync even
+  // Polling fallback: refresh state every 5s so the UI stays in sync even
   // if SSE events are missed (the SSE stream has no guaranteed delivery).
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
   useEffect(() => {
@@ -221,7 +141,7 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         .then((r) => r.json())
         .then(setState)
         .catch(() => {});
-    }, 1000);
+    }, 5000);
     return () => clearInterval(pollRef.current);
   }, [negotiationId]);
 
@@ -304,11 +224,7 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
           <div className="p-3 rounded-lg bg-gray-800 border border-cyan-800">
             <div className="flex items-center gap-3">
               <span className={`px-2 py-1 rounded border text-sm font-medium ${
-                (state?.quadrant || initialQuadrant) === "NON_CRITICAL" ? "bg-green-900/50 text-green-300 border-green-700" :
-                (state?.quadrant || initialQuadrant) === "LEVERAGE" ? "bg-blue-900/50 text-blue-300 border-blue-700" :
-                (state?.quadrant || initialQuadrant) === "BOTTLENECK" ? "bg-amber-900/50 text-amber-300 border-amber-700" :
-                (state?.quadrant || initialQuadrant) === "STRATEGIC" ? "bg-red-900/50 text-red-300 border-red-700" :
-                "bg-gray-700 text-gray-300 border-gray-600"
+                QUADRANT_COLORS[state?.quadrant || initialQuadrant || ""] || "bg-gray-700 text-gray-300 border-gray-600"
               }`}>
                 {state?.quadrant || initialQuadrant}
               </span>
