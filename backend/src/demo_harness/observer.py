@@ -202,7 +202,12 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
             and result.get("reason") == "no_pending_approval"
         ):
             try:
-                state = poll_once(result.get("negotiation_id", ""))
+                # approve_negotiation is a sync route (graph_client's Lambda
+                # invoke is blocking) run in Starlette's threadpool, so there is
+                # no running loop here — asyncio.run is safe. poll_once was
+                # previously called unawaited, silently raising AttributeError
+                # on the coroutine and making this whole recovery path dead code.
+                state = asyncio.run(poll_once(result.get("negotiation_id", "")))
                 if state and state.get("status") != "PENDING_APPROVAL":
                     logger.info(
                         "gate already resolved for %s — treating as approved", requisition_id
@@ -225,58 +230,46 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
 # ── Trace resolution ──────────────────────────────────────────────
 
 
+def _trace_id_from_header(trace_header: str | None) -> str | None:
+    """Extract the X-Ray trace ID (``Root=...``) from an execution's traceHeader."""
+    if not trace_header:
+        return None
+    for part in trace_header.split(";"):
+        if part.startswith("Root="):
+            return part.split("=", 1)[1]
+    return None
+
+
 @router.get("/negotiations/{negotiation_id}/traces")
 async def get_trace_urls(negotiation_id: str):
     """Resolve SFN execution + X-Ray trace URLs for a negotiation."""
-    from datetime import timedelta
-
     urls: dict = {"sfn": None, "xray": None}
+    region = os.getenv("AWS_REGION", "us-east-1")
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
     try:
-        sfn = boto3.client("stepfunctions", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        sfn = boto3.client("stepfunctions", region_name=region)
         machines = sfn.list_state_machines()["stateMachines"]
         arn = next((m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None)
         if arn:
             name = f"neg-{negotiation_id}"
             exec_arn = f"{arn.replace('stateMachine', 'execution')}:{name}"
             urls["sfn"] = (
-                f"https://{os.getenv('AWS_REGION', 'us-east-1')}.console.aws.amazon.com"
-                f"/states/home?region={os.getenv('AWS_REGION', 'us-east-1')}"
+                f"https://{region}.console.aws.amazon.com"
+                f"/states/home?region={region}"
                 f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
             )
-            # Use describe_execution for start/end times (get_execution_history
-            # with maxResults only returns the tail, missing ExecutionStarted).
+            # DescribeExecution's traceHeader carries the execution's own X-Ray
+            # trace ID (active tracing is enabled on the state machine) — a real
+            # lookup, not a duration/start-time guess against get_trace_summaries.
             try:
                 ex = sfn.describe_execution(executionArn=exec_arn)
-                exec_start = ex.get("startDate")
-                exec_end = ex.get("stopDate")
-                if exec_start and exec_end:
-                    xray = boto3.client("xray", region_name=os.getenv("AWS_REGION", "us-east-1"))
-                    # X-Ray indexing has sub-minute latency but the query window must be
-                    # wide enough. Use ±5 minutes around the execution.
-                    traces = xray.get_trace_summaries(
-                        StartTime=exec_start - timedelta(minutes=5),
-                        EndTime=exec_end + timedelta(minutes=5),
-                        TimeRangeType="TraceId",
-                    )["TraceSummaries"]
-                    duration = (exec_end - exec_start).total_seconds()
-                    # Find trace closest in duration and start time
-                    best = None
-                    best_score = float("inf")
-                    for t in traces:
-                        dur_diff = abs(t["Duration"] - duration)
-                        time_diff = abs((t["StartTime"] - exec_start).total_seconds())
-                        score = dur_diff + time_diff * 0.5
-                        if score < best_score and dur_diff < 20:
-                            best_score = score
-                            best = t
-                    if best:
-                        urls["xray"] = (
-                            f"https://{os.getenv('AWS_REGION', 'us-east-1')}.console.aws.amazon.com"
-                            f"/xray/home?region={os.getenv('AWS_REGION', 'us-east-1')}"
-                            f"#/traces/{best['Id']}"
-                        )
+                trace_id = _trace_id_from_header(ex.get("traceHeader"))
+                if trace_id:
+                    urls["xray"] = (
+                        f"https://{region}.console.aws.amazon.com"
+                        f"/xray/home?region={region}#/traces/{trace_id}"
+                    )
             except Exception:
                 pass
     except Exception:

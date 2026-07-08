@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from typing import overload
 from uuid import uuid4
 
 from boto3.dynamodb.conditions import Key
@@ -49,7 +50,11 @@ _correlation_ids: dict[str, str] = {}  # negotiation_id → correlation_id for e
 _global_subscribers: list[asyncio.Queue] = []  # for all-negotiation listeners
 
 
-def get_state(negotiation_id: str | None = None) -> dict | list[dict]:
+@overload
+def get_state(negotiation_id: str) -> dict | None: ...
+@overload
+def get_state(negotiation_id: None = None) -> list[dict]: ...
+def get_state(negotiation_id: str | None = None) -> dict | list[dict] | None:
     """Return current projection state for one or all negotiations."""
     if negotiation_id:
         return _state.get(negotiation_id)
