@@ -71,18 +71,12 @@ def _delete_batch(client: DynamoDBClient, table: str, keys: list[dict]) -> int:
 # ── table-specific resets ──────────────────────────────────────────
 
 
-def _delete_tenant_id_hash(client: DynamoDBClient, table: str) -> int:
+def _delete_tenant_id_hash(client: DynamoDBClient, table: str, sort_key: str) -> int:
     """Delete items where tenant_id (HASH) == TENANT_ID."""
     keys = _query_keys(
         client,
         table,
-        key_names=["tenant_id", "negotiation_id"]
-        if "negotiations" in table
-        else ["tenant_id", "bid_id"]
-        if "bids" in table
-        else ["tenant_id", "award_id"]
-        if "awards" in table
-        else ["tenant_id", "requisition_id"],
+        key_names=["tenant_id", sort_key],
         KeyConditionExpression="tenant_id = :tid",
         ExpressionAttributeValues={":tid": {"S": TENANT_ID}},
     )
@@ -147,17 +141,17 @@ def reset(env: str = "dev") -> dict[str, int]:
     print(f"[INFO] Blue Jets negotiation IDs: {len(blue_jets_neg_ids)} found")
 
     # Tables keyed by tenant_id (HASH)
-    counts["negotiations"] = _delete_tenant_id_hash(client, f"{env}-negotiations")
+    counts["negotiations"] = _delete_tenant_id_hash(client, f"{env}-negotiations", "negotiation_id")
     print(f"[OK] {env}-negotiations: {counts['negotiations']} items deleted")
 
-    counts["bids"] = _delete_tenant_id_hash(client, f"{env}-bids")
+    counts["bids"] = _delete_tenant_id_hash(client, f"{env}-bids", "bid_id")
     print(f"[OK] {env}-bids: {counts['bids']} items deleted")
 
-    counts["awards"] = _delete_tenant_id_hash(client, f"{env}-awards")
+    counts["awards"] = _delete_tenant_id_hash(client, f"{env}-awards", "award_id")
     print(f"[OK] {env}-awards: {counts['awards']} items deleted")
 
     counts["master_requisitions"] = _delete_tenant_id_hash(
-        client, f"{env}-test-tenant-master-purchase-requisitions"
+        client, f"{env}-test-tenant-master-purchase-requisitions", "requisition_id"
     )
     print(
         f"[OK] {env}-test-tenant-master-purchase-requisitions: {counts['master_requisitions']} items deleted"

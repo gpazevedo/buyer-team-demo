@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import overload
 from uuid import uuid4
@@ -27,6 +28,21 @@ from demo_harness.config import (
 # thread permanently occupies the default thread pool, which starves sync
 # endpoints (uvicorn runs those on the same pool). Cap each call at 5 s.
 _DDB_THREAD_TIMEOUT = 5.0
+
+# Supplier names rarely change; avoid refetching the map every ~1s poll cycle.
+_SUPPLIER_NAME_CACHE_TTL = 30.0
+_supplier_name_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _cached_supplier_name_map(tenant_id: str) -> dict:
+    now = time.monotonic()
+    cached = _supplier_name_cache.get(tenant_id)
+    if cached and now - cached[0] < _SUPPLIER_NAME_CACHE_TTL:
+        return cached[1]
+    names = _supplier_name_map(tenant_id)
+    _supplier_name_cache[tenant_id] = (now, names)
+    return names
+
 
 logger = logging.getLogger("demo_harness.offer_projection")
 
@@ -138,7 +154,7 @@ def _fetch_dynamo_data(negotiation_id: str) -> tuple:
     bids = _query_bids(negotiation_id)
     invitations = _query_communications(negotiation_id)
     feedback = _query_feedback(negotiation_id)
-    names = _supplier_name_map(TENANT_ID)
+    names = _cached_supplier_name_map(TENANT_ID)
     return neg, bids, invitations, feedback, names
 
 
@@ -323,6 +339,8 @@ async def poll_once(negotiation_id: str) -> dict | None:
         "invitations": invitations,
         "feedback": feedback,
         "bids": bids,
+        "awards": current_awards,
+        "orders": current_orders_list,
         "award_ids": list(current_award_ids),
         "order_ids": list(current_order_ids),
         "correlation_id": _correlation_ids.get(negotiation_id, ""),
@@ -548,7 +566,11 @@ async def poll_loop() -> None:
             if nid not in active_ids:
                 active_ids.append(nid)
 
-        for nid in active_ids:
-            await poll_once(nid)
+        results = await asyncio.gather(
+            *(poll_once(nid) for nid in active_ids), return_exceptions=True
+        )
+        for nid, result in zip(active_ids, results):
+            if isinstance(result, Exception):
+                logger.exception("poll_once crashed for %s", nid, exc_info=result)
 
         await asyncio.sleep(OBSERVER_POLL_SECONDS)

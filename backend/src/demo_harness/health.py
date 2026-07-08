@@ -23,6 +23,9 @@ logger = logging.getLogger("demo_harness.health")
 
 _INFORMATIVE_SOURCES = {"auto_priced", "supplier_response_seed"}
 
+_lambda_client = boto3.client("lambda", region_name=AWS_REGION)
+_ddb_resource = boto3.resource("dynamodb", region_name=AWS_REGION)
+
 
 def _classify_pricing_mode(bids: list[dict]) -> dict:
     """bids: already sorted newest-first by priced_at/created_at."""
@@ -39,20 +42,18 @@ def _classify_pricing_mode(bids: list[dict]) -> dict:
 def check_buyer_team() -> dict:
     checks: dict[str, str] = {}
 
-    lambda_client = boto3.client("lambda", region_name=AWS_REGION)
     try:
-        lambda_client.get_function(FunctionName=APPROVAL_GATE_FUNCTION)
+        _lambda_client.get_function(FunctionName=APPROVAL_GATE_FUNCTION)
         checks["approval_gate_lambda"] = "ok"
     except ClientError as e:
         checks["approval_gate_lambda"] = f"error: {e.response['Error']['Code']}"
 
-    ddb = boto3.resource("dynamodb", region_name=AWS_REGION)
     for label, table_name in (
         ("master_store_table", MASTER_STORE_TABLE),
         ("requisitions_table", REQUISITIONS_TABLE),
     ):
         try:
-            ddb.Table(table_name).table_status  # lazy describe_table under the hood
+            _ddb_resource.Table(table_name).table_status  # lazy describe_table under the hood
             checks[label] = "ok"
         except ClientError as e:
             checks[label] = f"error: {e.response['Error']['Code']}"

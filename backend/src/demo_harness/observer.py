@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
+from concurrent.futures import ThreadPoolExecutor
 
 import boto3
 from fastapi import APIRouter, HTTPException
@@ -26,10 +26,9 @@ from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.graph_client import graph_client
 from test_tenant_app.clients.master_data_client import master_data_client
 
-from demo_harness.config import TENANT_ID
+from demo_harness.config import AWS_REGION, TENANT_ID
 from demo_harness.health import check_buyer_team
 from demo_harness.offer_projection import (
-    _DDB_THREAD_TIMEOUT,
     get_state,
     poll_once,
     set_correlation_id,
@@ -39,6 +38,23 @@ from demo_harness.offer_projection import (
 
 logger = logging.getLogger("demo_harness.observer")
 router = APIRouter(prefix="/demo")
+
+_sfn_client = boto3.client("stepfunctions", region_name=AWS_REGION)
+_state_machine_arn: str | None = None
+_state_machine_arn_resolved = False
+
+
+def _resolve_state_machine_arn() -> str | None:
+    """The buyer-team state machine ARN doesn't change at runtime — cache it
+    so /traces doesn't call list_state_machines on every request."""
+    global _state_machine_arn, _state_machine_arn_resolved
+    if not _state_machine_arn_resolved:
+        machines = _sfn_client.list_state_machines()["stateMachines"]
+        _state_machine_arn = next(
+            (m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None
+        )
+        _state_machine_arn_resolved = True
+    return _state_machine_arn
 
 
 # ── Buyer Team reachability ───────────────────────────────────────
@@ -68,8 +84,10 @@ class PRRequest(BaseModel):
 
 @router.get("/negotiations/{negotiation_id}")
 async def get_negotiation(negotiation_id: str):
-    """Merged snapshot: SFN state + entities + communications + bids."""
-    # Poll to refresh state
+    """Merged snapshot: SFN state + entities + communications + bids.
+    poll_once already reads awards + orders while refreshing state, so no
+    separate Dynamo round trip is needed here.
+    """
     state = await poll_once(negotiation_id)
     if not state:
         # Try a fresh poll even if not tracked yet
@@ -78,69 +96,22 @@ async def get_negotiation(negotiation_id: str):
         logger.info("negotiation %s not found (not yet started?)", negotiation_id)
         raise HTTPException(status_code=404, detail="Negotiation not found")
 
-    # Read awards + orders from Dynamo (offloaded to thread to avoid blocking event loop)
-    requisition_id = state.get("requisition_id")
-    awards = []
-    orders = []
-    if requisition_id:
-        try:
-            awards = await asyncio.wait_for(
-                asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
-                timeout=_DDB_THREAD_TIMEOUT,
-            )
-        except (asyncio.TimeoutError, Exception):
-            pass
-        try:
-            orders = await asyncio.wait_for(
-                asyncio.to_thread(dynamo_client.get_orders, TENANT_ID),
-                timeout=_DDB_THREAD_TIMEOUT,
-            )
-            orders = [o for o in orders if o.get("requisition_id") == requisition_id]
-        except (asyncio.TimeoutError, Exception):
-            pass
-
-    return {
-        **state,
-        "awards": awards,
-        "orders": orders,
-    }
+    return state
 
 
 @router.get("/negotiations/{negotiation_id}/stream")
 async def stream_negotiation(negotiation_id: str):
     """SSE timeline — push node progress, offers, status changes."""
 
-    async def _read_awards_orders(requisition_id: str | None) -> tuple[list, list]:
-        if not requisition_id:
-            return [], []
-        awards, orders = [], []
-        try:
-            awards = await asyncio.wait_for(
-                asyncio.to_thread(dynamo_client.get_awards, TENANT_ID, requisition_id),
-                timeout=_DDB_THREAD_TIMEOUT,
-            )
-        except (asyncio.TimeoutError, Exception):
-            pass
-        try:
-            orders = await asyncio.wait_for(
-                asyncio.to_thread(dynamo_client.get_orders, TENANT_ID),
-                timeout=_DDB_THREAD_TIMEOUT,
-            )
-            orders = [o for o in orders if o.get("requisition_id") == requisition_id]
-        except (asyncio.TimeoutError, Exception):
-            pass
-        return awards, orders
-
     async def event_generator():
         q = subscribe(negotiation_id)
         try:
-            # Send initial snapshot (with awards + orders, same as GET endpoint)
+            # Send initial snapshot (poll_once already includes awards + orders)
             state = await poll_once(negotiation_id)
             if state:
-                awards, orders = await _read_awards_orders(state.get("requisition_id"))
                 yield {
                     "event": "snapshot",
-                    "data": json.dumps({**state, "awards": awards, "orders": orders}, default=str),
+                    "data": json.dumps(state, default=str),
                 }
             else:
                 yield {"event": "waiting", "data": json.dumps({"negotiation_id": negotiation_id})}
@@ -244,31 +215,28 @@ def _trace_id_from_header(trace_header: str | None) -> str | None:
 async def get_trace_urls(negotiation_id: str):
     """Resolve SFN execution + X-Ray trace URLs for a negotiation."""
     urls: dict = {"sfn": None, "xray": None}
-    region = os.getenv("AWS_REGION", "us-east-1")
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
     try:
-        sfn = boto3.client("stepfunctions", region_name=region)
-        machines = sfn.list_state_machines()["stateMachines"]
-        arn = next((m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None)
+        arn = _resolve_state_machine_arn()
         if arn:
             name = f"neg-{negotiation_id}"
             exec_arn = f"{arn.replace('stateMachine', 'execution')}:{name}"
             urls["sfn"] = (
-                f"https://{region}.console.aws.amazon.com"
-                f"/states/home?region={region}"
+                f"https://{AWS_REGION}.console.aws.amazon.com"
+                f"/states/home?region={AWS_REGION}"
                 f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
             )
             # DescribeExecution's traceHeader carries the execution's own X-Ray
             # trace ID (active tracing is enabled on the state machine) — a real
             # lookup, not a duration/start-time guess against get_trace_summaries.
             try:
-                ex = sfn.describe_execution(executionArn=exec_arn)
+                ex = _sfn_client.describe_execution(executionArn=exec_arn)
                 trace_id = _trace_id_from_header(ex.get("traceHeader"))
                 if trace_id:
                     urls["xray"] = (
-                        f"https://{region}.console.aws.amazon.com"
-                        f"/xray/home?region={region}#/traces/{trace_id}"
+                        f"https://{AWS_REGION}.console.aws.amazon.com"
+                        f"/xray/home?region={AWS_REGION}#/traces/{trace_id}"
                     )
             except Exception:
                 pass
@@ -398,11 +366,18 @@ def get_supplier_rfqs(supplier_id: str):
             negotiation_id, {"negotiation_id": negotiation_id, "invitations": [], "feedback": []}
         )
 
-    for negotiation_id, entry in by_negotiation.items():
-        entry["response"] = bids_by_negotiation.get(negotiation_id)
-        neg = dynamo_client.get_negotiation(TENANT_ID, negotiation_id)
-        entry["status"] = neg.get("status") if neg else None
-        entry["quadrant"] = neg.get("kraljic_quadrant") if neg else None
+    # Fan out the per-negotiation lookups instead of doing them one at a time.
+    negotiation_ids = list(by_negotiation)
+    if negotiation_ids:
+        with ThreadPoolExecutor(max_workers=min(8, len(negotiation_ids))) as pool:
+            negs = pool.map(
+                lambda nid: dynamo_client.get_negotiation(TENANT_ID, nid), negotiation_ids
+            )
+        for negotiation_id, neg in zip(negotiation_ids, negs):
+            entry = by_negotiation[negotiation_id]
+            entry["response"] = bids_by_negotiation.get(negotiation_id)
+            entry["status"] = neg.get("status") if neg else None
+            entry["quadrant"] = neg.get("kraljic_quadrant") if neg else None
 
     def _latest_ts(entry: dict) -> float:
         """Latest timestamp across invitations, feedback, and bid response."""
