@@ -261,6 +261,14 @@ storage resolution) reading the `procurement/business` namespace (emitted by
 
 ### 2. X-Ray Connected Trace (PR→PO)
 
+> **Easiest path during a demo:** Don't hunt through the trace list. Once a
+> negotiation reaches PENDING_APPROVAL, the Timeline tab header shows a
+> **"SFN Trace ↗"** link (always present) and, after 30-60s for X-Ray indexing,
+> a **"X-Ray Trace ↗"** link (green dot when resolved, red pulsing dot while
+> indexing). Click either to jump straight to the trace for *this* negotiation.
+> The generic filter instructions below are useful when you want to browse
+> multiple traces at once (e.g. the "run all four quadrants" walkthrough).
+
 URL: `https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL`
 
 Each PR triggers a Step Functions execution. All 6 node Lambdas now share a single
@@ -302,15 +310,27 @@ Key log groups:
 | `/aws/vendedlogs/bedrock-agentcore/dev-receiving-gateway-*` | Receiving Gateway AgentCore runtime logs |
 | `aws/spans` | X-Ray Transaction Search spans (indexed for full-text search across traces) |
 
-**CloudWatch Logs Insights query** for demo verification:
+**CloudWatch Logs Insights query** — show the full state-transition story for a
+single execution, top-to-bottom:
 
 ```sql
-# Show all procurement workflow events for the last 15 minutes
-fields @timestamp, @message
+fields @timestamp, type, stateEnteredEventDetails.name as entering, stateExitedEventDetails.name as exiting
 | filter logGroup = "/aws/vendedlogs/states/dev-buyer-team-procurement"
-| sort @timestamp desc
-| limit 20
+| filter type like /StateEntered|StateExited/
+| sort @timestamp asc
+| limit 50
 ```
+
+The state machine walks `IngestValidate → KraljicClassify → RouteStrategy →
+StrategyExecute → BidEvaluation → ApprovalGate → AwardComms → Done`. Each step
+produces a `StateEntered` / `StateExited` pair. `ApprovalGate` is a
+`waitForTaskToken` state — it can sit for an arbitrarily long time while waiting
+for the human to approve, so the gap between its Entered and Exited events is
+not an anomaly.
+
+> If you need the unfiltered log for a single execution (input/output payloads,
+> errors), replace the `type` filter with
+> `| filter execution_arn like /<execution-arn-tail>/`.
 
 ### 4. Agent Runtime Alarms
 

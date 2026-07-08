@@ -25,3 +25,7 @@ def test_buyer_team_is_reachable():
     body = res.json()
     assert set(body["checks"]) == EXPECTED_CHECKS
     assert body["healthy"] is True, f"Buyer Team unreachable: {body['checks']}"
+    assert body["pricing_mode"] in {"live", "fallback", "unknown"}, (
+        f"Unexpected pricing_mode: {body.get('pricing_mode')}"
+    )
+    assert "pricing_mode_source" in body
