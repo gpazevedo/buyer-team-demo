@@ -319,6 +319,7 @@ class MasterDataClient:
             if pr.get("status") == "PENDING_HUMAN_APPROVAL":
                 pr["approval_context"] = _approval_context(tenant_id, pr)
             out.append(pr)
+        out.sort(key=lambda p: p.get("created_at", ""), reverse=True)
         return out
 
     def approve_pr(self, tenant_id: str, requisition_id: str, approver: dict | None = None) -> dict:
