@@ -1,0 +1,15 @@
+{
+  "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd",
+  "categories": 19064,
+  "suppliers": 50,
+  "items": 19681,
+  "negotiations": 4651,
+  "phases": [
+    {"phase": "kraljic", "status": "complete", "entities_created": 19064, "last_loaded_at": "2026-06-12T04:00:00Z"},
+    {"phase": "procurement_kpi", "status": "complete", "entities_created": 50, "last_loaded_at": "2026-06-12T04:01:00Z"},
+    {"phase": "uci_retail", "status": "complete", "entities_created": 19681, "last_loaded_at": "2026-06-12T04:02:00Z"}
+  ],
+  "thresholds": {"profit_impact": 0.5, "supply_risk": 0.5},
+  "last_loaded_at": "2026-06-12T04:02:00Z",
+  "all_phases_complete": true
+}

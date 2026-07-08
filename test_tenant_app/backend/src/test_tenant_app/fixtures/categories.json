@@ -1,0 +1,6 @@
+[
+  {"category_id": "cat-001", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Office Supplies", "profit_impact": 0.2, "supply_risk": 0.1, "annual_spend": 45000, "quadrant": "non_critical", "supplier_count": 3, "item_count": 120},
+  {"category_id": "cat-002", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "IT Hardware", "profit_impact": 0.8, "supply_risk": 0.3, "annual_spend": 850000, "quadrant": "leverage", "supplier_count": 5, "item_count": 340},
+  {"category_id": "cat-003", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Rare Earth Components", "profit_impact": 0.6, "supply_risk": 0.9, "annual_spend": 320000, "quadrant": "bottleneck", "supplier_count": 2, "item_count": 45},
+  {"category_id": "cat-004", "tenant_id": "6eb4ebaf-804e-5837-ae26-f665a76b58dd", "name": "Semiconductor ICs", "profit_impact": 0.9, "supply_risk": 0.85, "annual_spend": 1200000, "quadrant": "strategic", "supplier_count": 1, "item_count": 89}
+]

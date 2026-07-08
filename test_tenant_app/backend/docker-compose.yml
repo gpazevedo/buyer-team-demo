@@ -1,0 +1,42 @@
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Honour the shell env so `AUTH_MODE=live bash run_demo.sh` actually
+      # enables Cognito JWT validation; defaults keep the plain `docker compose
+      # up` flow in no-auth dev mode.
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      SKILL_MODE: stub
+      ENV: dev
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      DEV_TENANT_ID: 6eb4ebaf-804e-5837-ae26-f665a76b58dd
+      # Required when AUTH_MODE=live — the JWKS source for token validation.
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
+      COGNITO_REGION: ${COGNITO_REGION:-us-east-1}
+      # Live PR→PO trigger (SKILL_MODE=live). Empty under the default stub mode.
+      STATE_MACHINE_ARN: ${STATE_MACHINE_ARN:-}
+      # Node 6 Approval Gate Lambda — /approve + /cancel release its paused token.
+      APPROVAL_GATE_FUNCTION: ${APPROVAL_GATE_FUNCTION:-dev-buyer-team-node6-approval-gate}
+    depends_on:
+      - dynamodb-local
+      - localstack
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    ports:
+      - "8001:8000"
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
+
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,sqs
+      AWS_DEFAULT_REGION: us-east-1
+      ACTIVATE_PRO: "0"
