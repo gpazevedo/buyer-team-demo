@@ -46,7 +46,7 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashbo
 
 ## Quick-start demo (3 minutes)
 
-1. Open `http://localhost:5174` — the header shows a green "Buyer Team reachable" badge.
+1. Open `http://localhost:5174` — the header shows a green "Buyer Team reachable" badge and a second pricing-mode badge: green "LLM agents reachable" when live Bedrock pricing is flowing, amber "Fallback pricing (VPC/NAT down)" when the resilience fallback is active, or gray "No recent bids" if nothing has priced yet. Hover it for the `pricing_mode_source`.
 2. Pick **Strategic** (HPT blade set, $96k/unit), quantity 1, click **Submit PR**.
 3. You are auto-switched to the **Timeline** tab. The progress bar shows: Ingest → Strategy → Evaluate → Approval → Award → PO Issued.
 4. Watch offers arrive from TurbineTech OEM (the only STRATEGIC supplier). Each new offer pops in via SSE.
@@ -85,7 +85,7 @@ Four Kraljic quadrants are available, each driving a different orchestrator path
 |----------|------|----------|---------------|
 | Non-Critical | Lavatory consumable kit ($180) | SPOT_BID | Auto-approves. Completes in ~30s. No approval panel appears. |
 | Leverage | Main wheel tire ($2,400) | COMPETITIVE_AUCTION | HITL only if awarded price >$5k (set qty ≥3). See competing bids from AeroStock, SkyParts, GlobalWheel. |
-| Bottleneck | VHF COMM transceiver ($11,800) | PARTNERSHIP_RISK | Always pauses for HITL approval. Block reason reads "STRATEGIC_APPROVAL_REQUIRED". |
+| Bottleneck | VHF COMM transceiver ($11,800) | PARTNERSHIP_RISK | Always pauses for HITL approval. Block reason reads "quadrant_bottleneck". |
 | Strategic | HPT stage-1 blade set ($96,000) | PARTNERSHIP_VALUE | Always pauses for HITL. Highest value — best savings story. |
 
 **Flow per strategy:**
@@ -229,9 +229,10 @@ The five suppliers:
 
 URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business`
 
-Nine widgets with **30-second refresh** (high-resolution metrics at 1-second
+Thirteen widgets with **30-second refresh** (high-resolution metrics at 1-second
 storage resolution) reading the `procurement/business` namespace (emitted by
-`orchestrator/resilience/metrics.py` across all node Lambdas):
+`orchestrator/resilience/metrics.py` across all node Lambdas) plus a `procurement/kpi`
+row (PRD-004 §2.3.3 KPI Summary):
 
 | Widget | What it shows during a demo |
 |--------|----------------------------|
@@ -245,6 +246,10 @@ storage resolution) reading the `procurement/business` namespace (emitted by
 | **Negotiation Savings — Amount / Pct** | Dollar savings and percentage calculated against estimated unit price vs awarded amount. Best demo story: STRATEGIC HPT blade — $96k est. vs ~$88k awarded = ~8% savings. |
 | **Token Usage — Input / Output (by agent + model tier)** | LLM token consumption across all 6 agents during this negotiation. Spikes visibly when the strategy/negotiation agents run. |
 | **Kraljic Classification Source (by source, stacked)** | Shows how each PR was classified — `agent` (LLM-driven), `semantic_cache` (cache hit), `rule_based_fallback` (resilience path). |
+| **KPI: Award Rate / Spend Coverage Rate (avg)** | 1.0 on every completed award, 0.0 on REJECTED/CANCELLED terminal paths. |
+| **KPI: Cost Savings Rate (avg, by strategy)** | Same savings signal as the business-dashboard savings widget, expressed as a rate and broken out by strategy. |
+| **KPI: Cycle Time — days (avg / p90, by quadrant)** | PR-`created_at` to PO-issued, in days, by Kraljic quadrant. |
+| **KPI: Supplier Response Rate (avg, by strategy)** | SPOT_BID auction rounds only — fraction of invited suppliers who responded. |
 
 **Live demo script for the dashboard:**
 
@@ -259,7 +264,29 @@ storage resolution) reading the `procurement/business` namespace (emitted by
   'Savings Amount' registers the dollar savings from the LLM negotiation."
 ```
 
-### 2. X-Ray Connected Trace (PR→PO)
+### 2. CloudWatch Operations Dashboard
+
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-operations`
+
+Platform/SRE health, separate from the business dashboard above — 10 widgets: node
+Lambda errors/duration, Step Functions failed/timed-out executions, agent runtime
+errors/latency, main-queue backlog + DLQ depth, circuit-breaker failures/state
+changes, AD-034 evaluation scores, and adversarial robustness score. Useful if a
+demo run stalls — check here first for an infrastructure-level cause before
+assuming an orchestrator logic bug.
+
+### 3. CloudWatch Cost Dashboard
+
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-cost`
+
+FinOps view reading the `procurement/cost` namespace — 4 widgets: token usage
+(input/output, by agent + model tier), cache read/write tokens, agent session
+duration by tenant (a cost-per-tenant proxy), and cost per negotiation (sum/avg
+by strategy, from `negotiation.total_cost_usd`). The last widget is the best one
+to pull up after a STRATEGIC demo run — it shows the actual per-negotiation
+Bedrock spend.
+
+### 4. X-Ray Connected Trace (PR→PO)
 
 > **Easiest path during a demo:** Don't hunt through the trace list. Once a
 > negotiation reaches PENDING_APPROVAL, the Timeline tab header shows a
@@ -283,11 +310,13 @@ node.ingest_validate → node.kraljic_classify → node.strategy_execute
   → node.bid_evaluation → node.approval_gate → node.award_comms
 ```
 
-Nodes 1-4 that invoke A2A agents (ingest, classify, strategy-execute, approval-gate)
-show an `agentcore.invoke` sub-span for the LLM call. Nodes 5 and 7 (bid-evaluation,
-award-comms) use inline deterministic logic — they complete in ~1-2s with only the
-node span and ADOT-instrumented DynamoDB reads/writes. The ADOT Lambda
-auto-instrumentation captures SDK calls across all 6 nodes.
+Only `node.kraljic_classify` and `node.strategy_execute` invoke A2A agents — each
+shows an `agentcore.invoke` sub-span for the LLM call. `node.ingest_validate` and
+`node.approval_gate` are pure deterministic logic, same as bid-evaluation and
+award-comms below. Nodes 5 and 7 (bid-evaluation, award-comms) use inline
+deterministic logic — they complete in ~1-2s with only the node span and
+ADOT-instrumented DynamoDB reads/writes. The ADOT Lambda auto-instrumentation
+captures SDK calls across all 6 nodes.
 
 **To find a trace:**
 
@@ -300,7 +329,7 @@ auto-instrumentation captures SDK calls across all 6 nodes.
 **Pro tip:** Sort by duration (longest first) — the STRATEGIC quadrant negotiation
 has the richest span detail (multi-round LLM negotiation).
 
-### 3. CloudWatch Logs
+### 5. CloudWatch Logs
 
 Key log groups:
 
@@ -332,14 +361,16 @@ not an anomaly.
 > errors), replace the `type` filter with
 > `| filter execution_arn like /<execution-arn-tail>/`.
 
-### 4. Agent Runtime Alarms
+### 6. Agent Runtime Alarms
 
-12 CloudWatch alarms cover the 6 AgentCore agent runtimes + 6 orchestrator node
-Lambdas + the Step Functions state machine:
+28 CloudWatch alarms cover the 6 AgentCore agent runtimes + the skill runtime +
+6 orchestrator node Lambdas + the Step Functions state machine (errors and
+duration/latency each get their own alarm):
 
 - `dev-buyer-team-{agent-name}-agent-errors` — fires on any AgentCore runtime error
 - `dev-buyer-team-{agent-name}-agent-latency` — fires on invocation >60s
 - `dev-buyer-team-{node-name}-errors` — fires on any node Lambda error
+- `dev-buyer-team-{node-name}-duration` — fires on elevated node Lambda duration
 - `dev-buyer-team-procurement-executions-failed` — fires on any failed SFN execution
 - `dev-buyer-team-procurement-executions-timed-out` — fires on any timed-out execution
 
@@ -382,6 +413,7 @@ with savings accumulated across multiple strategies.
 | "Loading item info..." hangs on New PR tab | Backend event loop blocked by a hung DynamoDB call | Restart the backend (`kill` + re-run uvicorn); all DynamoDB calls now have 5 s timeouts via `asyncio.wait_for` |
 | Duplicate awards/POs shown in UI | Previously caused by missing `_state` save and race conditions in concurrent poll cycles | Fixed — backend idempotency guards prevent duplicate SSE events; frontend handlers deduplicate by ID |
 | Progress bar goes all-gray after PO issued | Raw orchestrator `AUTO_APPROVED` status wasn't normalized; ProgressBar didn't recognize it | Fixed — `AUTO_APPROVED` maps to `APPROVED` in `_NEG_STATUS` and is in the ProgressBar `statusOrder` |
+| Progress bar goes all-gray with no approval panel, negotiation stuck at "CANCELLED" | Zero suppliers returned a qualifying bid (rare — would need every invited supplier to fail/decline) | Expected terminal state, not a bug — `CANCELLED` isn't in the ProgressBar `statusOrder` yet, so the bar just doesn't highlight a segment. Reset and resubmit. |
 | Page lands on "New PR" tab after HITL approval | `window.location.reload()` reset all React state to defaults | Fixed — active tab and negotiation ID saved to `sessionStorage` before reload and restored on init |
 | Dashboard widgets show "No data" | No negotiations completed today, or the IAM role for the emitting component doesn't include the `procurement/business` namespace in its `cloudwatch:PutMetricData` condition | Submit a PR and let it finish — data appears within 30 seconds. If it doesn't, the IAM policy for that Lambda's role needs the namespace added (see `infra/modules/step-functions/main.tf` step-invoker policy or `infra/agent_runtimes.tf` agent-runtime policy) |
 
@@ -390,6 +422,12 @@ with savings accumulated across multiple strategies.
 ```
 CloudWatch Business Dashboard (30s refresh):
   https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business
+
+CloudWatch Operations Dashboard (platform/SRE health):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-operations
+
+CloudWatch Cost Dashboard (FinOps — token usage, cost per negotiation):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-cost
 
 X-Ray Traces — Connected PR→PO trace (filter by tenant_id annotation):
   https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL

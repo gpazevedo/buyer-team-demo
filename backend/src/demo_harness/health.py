@@ -31,9 +31,9 @@ def _classify_pricing_mode(bids: list[dict]) -> dict:
         if source in _INFORMATIVE_SOURCES:
             continue
         if source.endswith("_fallback_stub"):
-            return {"pricing_mode": "fallback", "source": source}
-        return {"pricing_mode": "live", "source": source}
-    return {"pricing_mode": "unknown", "source": None}
+            return {"pricing_mode": "fallback", "pricing_mode_source": source}
+        return {"pricing_mode": "live", "pricing_mode_source": source}
+    return {"pricing_mode": "unknown", "pricing_mode_source": None}
 
 
 def check_buyer_team() -> dict:
@@ -81,4 +81,4 @@ def _get_pricing_mode() -> dict:
         return _classify_pricing_mode(bids[:10])
     except Exception:
         logger.debug("Could not determine pricing mode", exc_info=True)
-        return {"pricing_mode": "unknown", "source": None}
+        return {"pricing_mode": "unknown", "pricing_mode_source": None}
