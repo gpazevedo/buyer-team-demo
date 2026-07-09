@@ -7,6 +7,7 @@ seams this harness uses.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -19,12 +20,15 @@ from demo_harness.config import (
     TENANT_ID,
 )
 
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
+
 logger = logging.getLogger("demo_harness.health")
 
 _INFORMATIVE_SOURCES = {"auto_priced", "supplier_response_seed"}
 
 _lambda_client = boto3.client("lambda", region_name=AWS_REGION)
-_ddb_resource = boto3.resource("dynamodb", region_name=AWS_REGION)
+_ddb_resource = cast("DynamoDBServiceResource", boto3.resource("dynamodb", region_name=AWS_REGION))
 
 
 def _classify_pricing_mode(bids: list[dict]) -> dict:

@@ -20,6 +20,8 @@ from uuid import NAMESPACE_DNS, uuid5
 
 import boto3
 
+from test_tenant_app.auth.jwt import Approver
+
 logger = logging.getLogger("graph_client")
 SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -47,7 +49,7 @@ _SYSTEM_APPROVER = {"user_id": "test-tenant-app", "claims": {}}
 
 class GraphClient:
     def approve_award(
-        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+        self, tenant_id: str, requisition_id: str, approver: Approver | None = None
     ) -> dict:
         """Release a paused Approval Gate with an APPROVED decision so Node 7 runs.
 
@@ -65,7 +67,7 @@ class GraphClient:
         tenant_id: str,
         requisition_id: str,
         reason: str | None = None,
-        approver: dict | None = None,
+        approver: Approver | None = None,
     ) -> dict:
         """Release a paused Approval Gate with a REJECTED decision (cancels the
         negotiation + requisition). A no-op if nothing is paused."""
@@ -74,7 +76,7 @@ class GraphClient:
         return self._resume_approval(tenant_id, requisition_id, "REJECTED", reason, approver)
 
     def cycle_back_award(
-        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+        self, tenant_id: str, requisition_id: str, approver: Approver | None = None
     ) -> dict:
         """Release a paused Approval Gate with a CYCLE_BACK decision — re-run the
         strategy once (Node 6), or hand off to REQUIRES_ATTENTION when exhausted."""
@@ -88,7 +90,7 @@ class GraphClient:
         requisition_id: str,
         decision: str,
         reason: str | None = None,
-        approver: dict | None = None,
+        approver: Approver | None = None,
     ) -> dict:
         negotiation_id = _negotiation_id(tenant_id, requisition_id)
         # Node 6's claims gate reads approver.tenant_id + approver.claims; carry the

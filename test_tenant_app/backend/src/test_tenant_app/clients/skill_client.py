@@ -11,6 +11,7 @@ import os
 import uuid
 from functools import cache
 from pathlib import Path
+from typing import Any, cast
 
 import boto3
 from opentelemetry import propagate, trace
@@ -60,7 +61,7 @@ def _resolve_skill_runtime_name() -> str:
         resp = cfg_table.get_item(Key={"config_group": "registry", "config_key": "default"})
         item = resp.get("Item")
         if item:
-            registry = json.loads(item["config_json"])
+            registry = json.loads(cast(str, item["config_json"]))
             mcp_logical = registry["skills"][_SKILL_LOGICAL]["runtime"]
             return registry["mcp_servers"][mcp_logical]["runtime_name"]
     except Exception:
@@ -134,7 +135,7 @@ def _query_by_tenant(table_name: str, tenant_id: str) -> list[dict]:
 
     items, start_key = [], None
     while True:
-        kwargs = {"KeyConditionExpression": Key("tenant_id").eq(tenant_id)}
+        kwargs: dict[str, Any] = {"KeyConditionExpression": Key("tenant_id").eq(tenant_id)}
         if start_key:
             kwargs["ExclusiveStartKey"] = start_key
         resp = table(table_name).query(**kwargs)

@@ -22,6 +22,7 @@ import boto3
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from test_tenant_app.auth.jwt import Approver
 from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.graph_client import graph_client
 from test_tenant_app.clients.master_data_client import master_data_client
@@ -147,7 +148,7 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
             detail=f"Invalid decision: {body.decision}. Must be APPROVED, REJECTED, or CYCLE_BACK",
         )
 
-    approver = {"user_id": "demo-harness", "tenant_id": TENANT_ID, "claims": {}}
+    approver: Approver = {"user_id": "demo-harness", "tenant_id": TENANT_ID, "claims": {}}
     logger.info("approval decision=%s requisition_id=%s", decision, requisition_id)
 
     try:

@@ -14,10 +14,14 @@ import argparse
 import json
 import logging
 import os
+from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_DNS, uuid5
 
 import boto3
 from test_tenant_app.clients.ddb import to_decimal
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 logger = logging.getLogger("demo_harness.seed")
 
@@ -355,7 +359,7 @@ def seed(env: str = ENV, region: str = REGION) -> dict:
 
 def seed_status(env: str = ENV, region: str = REGION) -> dict:
     """Read-only check: what Blue Jets entities exist?"""
-    ddb = boto3.resource("dynamodb", region_name=region)
+    ddb = cast("DynamoDBServiceResource", boto3.resource("dynamodb", region_name=region))
 
     def _count(table_suffix: str) -> int:
         try:
