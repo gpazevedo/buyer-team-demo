@@ -15,7 +15,7 @@ export type Bid = {
 
 function formatEpoch(seconds?: number): string | null {
   if (!seconds) return null;
-  return new Date(seconds * 1000).toLocaleString();
+  return new Date(seconds * 1000).toLocaleTimeString();
 }
 
 export default function OfferCard({ bid }: { bid: Bid }) {
@@ -23,10 +23,10 @@ export default function OfferCard({ bid }: { bid: Bid }) {
   const isBest = bid.evaluation_rank === 1;
 
   return (
-    <div className={`p-4 rounded-lg border transition-colors ${
+    <div className={`p-2.5 rounded-lg border transition-colors ${
       isBest ? "border-blue-700 bg-blue-950/20" : "border-gray-700 bg-gray-800"
     }`}>
-      <div className="flex justify-between items-start mb-2">
+      <div className="flex justify-between items-start mb-1">
         <div>
           <div className="font-medium text-sm">{bid.supplier_name || bid.supplier_id}</div>
           {bid.delivery_days && (
@@ -49,9 +49,9 @@ export default function OfferCard({ bid }: { bid: Bid }) {
         </div>
       </div>
 
-      {/* Source badge */}
-      {bid.source && (
-        <div className="flex items-center gap-2 mt-2">
+      {/* Source badge + status, single row */}
+      <div className="flex items-center gap-2 mt-1">
+        {bid.source && (
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
             bid.source.includes("agent") ? "bg-purple-900/50 text-purple-300" :
             bid.source.includes("fallback") ? "bg-red-900/50 text-red-300" :
@@ -60,18 +60,16 @@ export default function OfferCard({ bid }: { bid: Bid }) {
           }`}>
             {bid.source}
           </span>
-          {isBest && (
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/50 text-blue-300">
-              BEST
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Status */}
-      <div className="text-[10px] text-gray-500 mt-1.5">
-        {bid.status || "UNKNOWN"} — {bid.bid_id}
-        {formatEpoch(bid.priced_at) && <> · priced {formatEpoch(bid.priced_at)}</>}
+        )}
+        {isBest && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-900/50 text-blue-300">
+            BEST
+          </span>
+        )}
+        <span className="text-[10px] text-gray-500 ml-auto">
+          {bid.status || "UNKNOWN"}
+          {formatEpoch(bid.priced_at) && <> · {formatEpoch(bid.priced_at)}</>}
+        </span>
       </div>
     </div>
   );

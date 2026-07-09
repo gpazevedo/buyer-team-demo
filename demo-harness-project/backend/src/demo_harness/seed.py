@@ -1,7 +1,8 @@
 """Blue Jets tenant seed — idempotent via uuid5 inline idiom (PRD-020 §4).
 
-Creates: tenant, 4 categories (one per Kraljic quadrant), 4 items, 5 suppliers,
-and category-supplier associations. Safe to run repeatedly.
+Creates: tenant, 4 categories (one per Kraljic quadrant), 4 items, 8 suppliers
+(3+ candidates per quadrant for a real multi-bid negotiation), and
+category-supplier associations. Safe to run repeatedly.
 
 Usage:
   uv run python -m demo_harness.seed [--env dev] [--region us-east-1]
@@ -140,6 +141,36 @@ SUPPLIERS = [
         "risk_rating": "MEDIUM",
         "on_time_delivery_rate": 0.85,
     },
+    {
+        "name": "CabinSource Aero",
+        "cage": "2DF77",
+        "quadrants": ["NON_CRITICAL"],
+        "performance_score": 0.76,
+        "quality_score": 0.73,
+        "esg_score": 0.68,
+        "risk_rating": "LOW",
+        "on_time_delivery_rate": 0.90,
+    },
+    {
+        "name": "Continental Engine Parts",
+        "cage": "88GHT",
+        "quadrants": ["STRATEGIC", "BOTTLENECK"],
+        "performance_score": 0.84,
+        "quality_score": 0.86,
+        "esg_score": 0.74,
+        "risk_rating": "LOW",
+        "on_time_delivery_rate": 0.93,
+    },
+    {
+        "name": "Apex Rotables",
+        "cage": "5QW20",
+        "quadrants": ["STRATEGIC"],
+        "performance_score": 0.68,
+        "quality_score": 0.66,
+        "esg_score": 0.58,
+        "risk_rating": "HIGH",
+        "on_time_delivery_rate": 0.81,
+    },
 ]
 
 
@@ -225,10 +256,11 @@ def seed_items(ddb, env: str, cat_ids: dict[str, str]) -> dict[str, str]:
 
 
 def seed_suppliers(ddb, env: str, cat_ids: dict[str, str]) -> dict[str, str]:
-    """Seed 5 suppliers + category-supplier associations. Returns {name: supplier_id}."""
+    """Seed suppliers (3+ per quadrant) + category-supplier associations. Returns {name: supplier_id}."""
     sup_table = ddb.Table(f"{env}-suppliers")
     cs_table = ddb.Table(f"{env}-category-suppliers")
     sup_ids: dict[str, str] = {}
+    by_quadrant: dict[str, list[str]] = {}
     for sup in SUPPLIERS:
         sid = _supplier_id(sup["name"])
         sup_ids[sup["name"]] = sid
@@ -250,16 +282,24 @@ def seed_suppliers(ddb, env: str, cat_ids: dict[str, str]) -> dict[str, str]:
         )
         print(f"[OK] {env}-suppliers: {sup['name']} (CAGE {sup['cage']}) = {sid}")
         for quadrant in sup["quadrants"]:
-            cs_table.put_item(
-                Item=to_decimal(
-                    {
-                        "tenant_id": TENANT_ID,
-                        "category_id": cat_ids[quadrant],
-                        "supplier_id": sid,
-                    }
-                )
+            by_quadrant.setdefault(quadrant, []).append(sid)
+
+    # category-suppliers PK is (tenant_id, category_id) only — one row per
+    # category, so every candidate for that category goes on a single
+    # `supplier_ids` list rather than one row per supplier (which would just
+    # overwrite down to the last one). Matches the impl orchestrator's
+    # `_candidate_supplier_ids`, which already reads this list attribute.
+    for quadrant, supplier_ids in by_quadrant.items():
+        cs_table.put_item(
+            Item=to_decimal(
+                {
+                    "tenant_id": TENANT_ID,
+                    "category_id": cat_ids[quadrant],
+                    "supplier_ids": supplier_ids,
+                }
             )
-            print(f"      -> category-supplier: {quadrant}")
+        )
+        print(f"[OK] {env}-category-suppliers: {quadrant} -> {len(supplier_ids)} suppliers")
     return sup_ids
 
 
