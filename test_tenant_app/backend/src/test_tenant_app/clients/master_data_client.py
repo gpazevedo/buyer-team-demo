@@ -15,7 +15,13 @@ from __future__ import annotations
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
+
+from test_tenant_app.auth.jwt import Approver
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 ENV = os.getenv("ENV", "dev")
@@ -158,7 +164,7 @@ def _synthesize_graph_nodes(tenant_id: str, pr: dict) -> dict:
     failed = status == "FAILED"
 
     nodes["kraljic"] = "completed" if neg.get("kraljic_quadrant") else "in_progress"
-    strat_node = _STRATEGY_NODE.get(neg.get("strategy"), "negotiation")
+    strat_node = _STRATEGY_NODE.get(neg.get("strategy", ""), "negotiation")
     nodes[strat_node] = "completed" if awarded else "in_progress"
     nodes["bid_evaluation"] = (
         "completed" if awarded else ("in_progress" if not failed else "failed")
@@ -322,7 +328,9 @@ class MasterDataClient:
         out.sort(key=lambda p: p.get("created_at", ""), reverse=True)
         return out
 
-    def approve_pr(self, tenant_id: str, requisition_id: str, approver: dict | None = None) -> dict:
+    def approve_pr(
+        self, tenant_id: str, requisition_id: str, approver: Approver | None = None
+    ) -> dict:
         if SKILL_MODE == "stub":
             key = f"{tenant_id}:{requisition_id}"
             pr = _stub_requisitions.get(key)
@@ -339,7 +347,11 @@ class MasterDataClient:
         return graph_client.approve_award(tenant_id, requisition_id, approver=approver)
 
     def reject_pr(
-        self, tenant_id: str, requisition_id: str, reason: str = "", approver: dict | None = None
+        self,
+        tenant_id: str,
+        requisition_id: str,
+        reason: str = "",
+        approver: Approver | None = None,
     ) -> dict:
         """Approver rejects the pending award (HITL REJECTED). Node 6's REJECTED
         path cancels the negotiation + requisition, so the API must not pre-empt it."""
@@ -357,7 +369,7 @@ class MasterDataClient:
         )
 
     def cycle_back_pr(
-        self, tenant_id: str, requisition_id: str, approver: dict | None = None
+        self, tenant_id: str, requisition_id: str, approver: Approver | None = None
     ) -> dict:
         """Approver sends the award back for re-negotiation (HITL CYCLE_BACK). Node 6
         re-runs the strategy once, then hands off to REQUIRES_ATTENTION when exhausted."""
@@ -420,12 +432,15 @@ class MasterDataClient:
 
         import boto3
 
-        ddb = boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        ddb = cast(
+            "DynamoDBServiceResource",
+            boto3.resource("dynamodb", region_name=os.getenv("AWS_REGION", "us-east-1")),
+        )
         table = ddb.Table(f"{env}-system-config")
         resp = table.get_item(Key={"config_group": "kraljic", "config_key": "thresholds"})
         item = resp.get("Item")
         if item:
-            return _json.loads(item["config_json"])
+            return _json.loads(cast(str, item["config_json"]))
         return {"profit_impact": 0.5, "supply_risk": 0.5}
 
 

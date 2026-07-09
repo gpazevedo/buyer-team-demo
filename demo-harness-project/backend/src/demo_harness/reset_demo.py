@@ -9,7 +9,7 @@ KEEPS: tenants, categories, items, suppliers, category-suppliers.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from demo_harness.config import TENANT_ID
 
@@ -98,7 +98,7 @@ def _delete_tenant_pk_prefix(client: DynamoDBClient, table: str) -> int:
 def _clear_table(client: DynamoDBClient, table: str) -> int:
     """Delete ALL items from a table (use only for cache/temp tables)."""
     desc = client.describe_table(TableName=table)
-    key_names = [k["AttributeName"] for k in desc["Table"]["KeySchema"]]
+    key_names = [k["AttributeName"] for k in desc["Table"].get("KeySchema", [])]
     keys = _scan_keys(client, table, key_names)
     return _delete_batch(client, table, keys)
 
@@ -133,7 +133,7 @@ def reset(env: str = "dev") -> dict[str, int]:
     """Delete all Blue Jets runtime data. Returns {table: count_deleted}."""
     import boto3
 
-    client = boto3.client("dynamodb", region_name="us-east-1")
+    client = cast("DynamoDBClient", boto3.client("dynamodb", region_name="us-east-1"))
     counts: dict[str, int] = {}
 
     # Capture Blue Jets negotiation IDs BEFORE deleting negotiations

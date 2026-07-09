@@ -5,7 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from test_tenant_app.auth.jwt import get_tenant_id
 from test_tenant_app.clients.dynamo_client import dynamo_client
 from test_tenant_app.clients.skill_client import skill_client
-from test_tenant_app.models import Category, Item, Negotiation, NegotiationDetail, Supplier
+from test_tenant_app.models import (
+    Bid,
+    Category,
+    CommunicationEntry,
+    Item,
+    Negotiation,
+    NegotiationDetail,
+    Supplier,
+)
 
 router = APIRouter(tags=["catalog"])
 
@@ -60,4 +68,8 @@ def get_negotiation(negotiation_id: str, tenant_id: str = Depends(get_tenant_id)
         raise HTTPException(status_code=404, detail="Negotiation not found")
     bids = dynamo_client.get_bids_for_negotiation(tenant_id, negotiation_id, neg["requisition_id"])
     comms = dynamo_client.get_communications(tenant_id, negotiation_id)
-    return NegotiationDetail(**neg, bids=bids, communications=comms)
+    return NegotiationDetail(
+        **neg,
+        bids=[Bid(**b) for b in bids],
+        communications=[CommunicationEntry(**c) for c in comms],
+    )

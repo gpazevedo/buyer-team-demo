@@ -13,12 +13,16 @@ import os
 from datetime import datetime, timezone
 from functools import cache
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
 from test_tenant_app.clients.ddb import table as _live_table
 from test_tenant_app.clients.ddb import to_native
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 ENV = os.getenv("ENV", "dev")
 REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -29,11 +33,11 @@ SKILL_MODE = os.getenv("SKILL_MODE", "stub")
 
 
 @cache
-def _ddb():
+def _ddb() -> "DynamoDBServiceResource":
     kwargs = {"region_name": REGION}
     if DYNAMODB_ENDPOINT:
         kwargs["endpoint_url"] = DYNAMODB_ENDPOINT
-    return boto3.resource("dynamodb", **kwargs)
+    return cast("DynamoDBServiceResource", boto3.resource("dynamodb", **kwargs))
 
 
 def _table(name: str):
@@ -121,7 +125,7 @@ def _normalize_bid(b: dict, requisition_id: str, names: dict[str, str]) -> dict:
     return {
         **b,
         "requisition_id": b.get("requisition_id", requisition_id),
-        "supplier_name": b.get("supplier_name") or names.get(b.get("supplier_id")),
+        "supplier_name": b.get("supplier_name") or names.get(b.get("supplier_id", "")),
         "total_amount": b.get("total_amount", b.get("amount", 0.0)),
         "lead_time_days": b.get("lead_time_days", b.get("delivery_days")),
         "is_best_bid": b.get("is_best_bid", int(b.get("evaluation_rank", 0) or 0) == 1),
@@ -138,7 +142,7 @@ def _normalize_award(a: dict, names: dict[str, str]) -> dict:
     return {
         **a,
         "bid_id": a.get("bid_id", a.get("winning_bid_id", "")),
-        "supplier_name": a.get("supplier_name") or names.get(a.get("supplier_id")),
+        "supplier_name": a.get("supplier_name") or names.get(a.get("supplier_id", "")),
         "total_amount": total,
         "savings_amount": savings,
         "savings_pct": a.get("savings_pct", round(savings / total * 100, 1) if total else 0.0),
@@ -166,7 +170,7 @@ def _normalize_negotiation(n: dict, names: dict[str, str]) -> dict:
         **n,
         "supplier_id": supplier_id,
         "supplier_name": n.get("supplier_name") or names.get(supplier_id),
-        "status": _NEG_STATUS.get(n.get("status"), n.get("status", "PENDING")),
+        "status": _NEG_STATUS.get(n.get("status", ""), n.get("status", "PENDING")),
         "started_at": _epoch(n.get("started_at") or n.get("created_at")),
         "completed_at": _epoch(n.get("completed_at") or n.get("approved_at")),
     }

@@ -9,9 +9,12 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 from functools import cache
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, cast, overload
 
 import boto3
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 ENV = os.getenv("ENV", "dev")
 REGION = os.getenv("AWS_REGION", "us-east-1")
@@ -19,11 +22,11 @@ DYNAMODB_ENDPOINT = os.getenv("DYNAMODB_ENDPOINT", "")
 
 
 @cache
-def _resource():
+def _resource() -> "DynamoDBServiceResource":
     kwargs = {"region_name": REGION}
     if DYNAMODB_ENDPOINT:
         kwargs["endpoint_url"] = DYNAMODB_ENDPOINT
-    return boto3.resource("dynamodb", **kwargs)
+    return cast("DynamoDBServiceResource", boto3.resource("dynamodb", **kwargs))
 
 
 def table(name: str):
