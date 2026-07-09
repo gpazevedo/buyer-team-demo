@@ -299,19 +299,8 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         </section>
       )}
 
-      {/* Bids / Offers */}
-      {state?.bids && state.bids.length > 0 && (
-        <section className="mb-4">
-          <h3 className="text-base font-semibold mb-1.5">Supplier Offers</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {state.bids.map((bid) => (
-              <OfferCard key={bid.bid_id} bid={bid} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Award */}
+      {/* Award — shown above the supplier quotations so the outcome is the
+          first thing visible, not buried below a long offer list */}
       {state?.awards && state.awards.length > 0 && (
         <section className="mb-4">
           <h3 className="text-base font-semibold mb-1.5">Award</h3>
@@ -348,6 +337,18 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
               </div>
             </div>
           ))}
+        </section>
+      )}
+
+      {/* Bids / Offers */}
+      {state?.bids && state.bids.length > 0 && (
+        <section className="mb-4">
+          <h3 className="text-base font-semibold mb-1.5">Supplier Offers</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {state.bids.map((bid) => (
+              <OfferCard key={bid.bid_id} bid={bid} />
+            ))}
+          </div>
         </section>
       )}
 
