@@ -288,6 +288,17 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         </section>
       )}
 
+      {/* Approval Controls — shown above the offer cards so it's never
+          pushed below the fold by a long supplier list */}
+      {state?.status === "PENDING_APPROVAL" && state.requisition_id && (
+        <section className="mb-4">
+          <ApprovalControls
+            requisitionId={state.requisition_id}
+            blockReason={state.approval_block_reason}
+          />
+        </section>
+      )}
+
       {/* Bids / Offers */}
       {state?.bids && state.bids.length > 0 && (
         <section className="mb-4">
@@ -297,16 +308,6 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
               <OfferCard key={bid.bid_id} bid={bid} />
             ))}
           </div>
-        </section>
-      )}
-
-      {/* Approval Controls */}
-      {state?.status === "PENDING_APPROVAL" && state.requisition_id && (
-        <section className="mb-4">
-          <ApprovalControls
-            requisitionId={state.requisition_id}
-            blockReason={state.approval_block_reason}
-          />
         </section>
       )}
 
