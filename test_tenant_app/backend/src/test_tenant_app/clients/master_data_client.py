@@ -12,6 +12,7 @@ SKILL_MODE=live  canonical event-driven path: create_pr writes the PR to the ten
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,8 @@ from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from test_tenant_app.auth.jwt import Approver
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
@@ -318,6 +321,15 @@ class MasterDataClient:
         )
         out = []
         for pr in to_native(resp.get("Items", [])):
+            # A row with no requisition_id is a partial/orphaned write (e.g. a status-only
+            # update that never landed the full row) — _synthesize_graph_nodes indexes
+            # pr["requisition_id"] unconditionally, so one such row would otherwise 500 the
+            # whole list instead of just being missing from it.
+            if "requisition_id" not in pr:
+                logger.warning(
+                    "skipping requisition row with no requisition_id: pk=%s", pr.get("pk")
+                )
+                continue
             if status and pr.get("status") != status:
                 continue
             pr.setdefault("updated_at", pr.get("created_at"))
