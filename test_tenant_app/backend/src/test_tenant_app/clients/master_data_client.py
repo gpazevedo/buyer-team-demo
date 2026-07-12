@@ -326,7 +326,9 @@ class MasterDataClient:
             # pr["requisition_id"] unconditionally, so one such row would otherwise 500 the
             # whole list instead of just being missing from it.
             if "requisition_id" not in pr:
-                logger.warning("skipping requisition row with no requisition_id: pk=%s", pr.get("pk"))
+                logger.warning(
+                    "skipping requisition row with no requisition_id: pk=%s", pr.get("pk")
+                )
                 continue
             if status and pr.get("status") != status:
                 continue
