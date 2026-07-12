@@ -32,7 +32,7 @@ def test_returns_none_when_header_absent():
 async def test_cost_dashboard_url_is_always_present(monkeypatch):
     """cost_dashboard is negotiation-agnostic (env/region only) — must be
     returned even when SFN execution/trace resolution fails entirely."""
-    monkeypatch.setattr(observer, "_resolve_state_machine_arn", lambda: None)
+    monkeypatch.setattr(observer, "resolve_state_machine_arn", lambda: None)
 
     urls = await observer.get_trace_urls("neg-1")
 

@@ -31,7 +31,7 @@ describe("BuyerTeamStatus", () => {
       "fetch",
       mockHealth({
         healthy: true,
-        checks: { approval_gate_lambda: "ok" },
+        checks: { approval_gate_lambda: "ok", step_functions: "ok" },
         pricing_mode: "live",
         pricing_mode_source: "spot_bidding_agent",
       })
@@ -41,6 +41,21 @@ describe("BuyerTeamStatus", () => {
 
     expect(await screen.findByText("Buyer Team reachable")).toBeInTheDocument();
     expect(screen.getByText("LLM agents reachable")).toBeInTheDocument();
+    expect(screen.getByText("Step Functions reachable")).toBeInTheDocument();
+  });
+
+  it("shows Step Functions unreachable when its check fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockHealth({
+        healthy: false,
+        checks: { step_functions: "error: state machine not found" },
+      })
+    );
+
+    render(<BuyerTeamStatus />);
+
+    expect(await screen.findByText("Step Functions unreachable")).toBeInTheDocument();
   });
 
   it("shows unreachable when the health check reports unhealthy", async () => {

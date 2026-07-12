@@ -18,7 +18,6 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-import boto3
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
@@ -28,7 +27,7 @@ from test_tenant_app.clients.graph_client import graph_client
 from test_tenant_app.clients.master_data_client import master_data_client
 
 from demo_harness.config import AWS_REGION, ENV, TENANT_ID
-from demo_harness.health import check_buyer_team
+from demo_harness.health import _sfn_client, check_buyer_team, resolve_state_machine_arn
 from demo_harness.offer_projection import (
     get_state,
     poll_once,
@@ -39,23 +38,6 @@ from demo_harness.offer_projection import (
 
 logger = logging.getLogger("demo_harness.observer")
 router = APIRouter(prefix="/demo")
-
-_sfn_client = boto3.client("stepfunctions", region_name=AWS_REGION)
-_state_machine_arn: str | None = None
-_state_machine_arn_resolved = False
-
-
-def _resolve_state_machine_arn() -> str | None:
-    """The buyer-team state machine ARN doesn't change at runtime — cache it
-    so /traces doesn't call list_state_machines on every request."""
-    global _state_machine_arn, _state_machine_arn_resolved
-    if not _state_machine_arn_resolved:
-        machines = _sfn_client.list_state_machines()["stateMachines"]
-        _state_machine_arn = next(
-            (m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None
-        )
-        _state_machine_arn_resolved = True
-    return _state_machine_arn
 
 
 # ── Buyer Team reachability ───────────────────────────────────────
@@ -228,7 +210,7 @@ async def get_trace_urls(negotiation_id: str):
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
     try:
-        arn = _resolve_state_machine_arn()
+        arn = resolve_state_machine_arn()
         if arn:
             name = f"neg-{negotiation_id}"
             exec_arn = f"{arn.replace('stateMachine', 'execution')}:{name}"

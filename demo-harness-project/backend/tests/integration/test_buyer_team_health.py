@@ -1,7 +1,8 @@
 """Is Buyer Team actually reachable? Exercises the real /demo/health route
-(Node 6 approval-gate Lambda + master-store/requisitions DynamoDB tables),
-not a mocked stand-in — a red result here means the harness cannot drive
-the real orchestrator, not that a test assertion is wrong.
+(Node 6 approval-gate Lambda + master-store/requisitions DynamoDB tables +
+Step Functions state machine), not a mocked stand-in — a red result here
+means the harness cannot drive the real orchestrator, not that a test
+assertion is wrong.
 """
 
 from __future__ import annotations
@@ -14,7 +15,12 @@ os.environ.setdefault("ENV", "dev")
 from demo_harness.main import app
 from fastapi.testclient import TestClient
 
-EXPECTED_CHECKS = {"approval_gate_lambda", "master_store_table", "requisitions_table"}
+EXPECTED_CHECKS = {
+    "approval_gate_lambda",
+    "master_store_table",
+    "requisitions_table",
+    "step_functions",
+}
 
 
 def test_buyer_team_is_reachable():

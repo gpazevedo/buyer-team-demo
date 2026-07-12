@@ -1,7 +1,7 @@
-"""Is Buyer Team actually reachable? Checks the two AWS resources this harness
-depends on directly: the Node 6 approval-gate Lambda (S4) and the master-store /
-requisitions DynamoDB tables (S1). Not a full platform health check — just the
-seams this harness uses.
+"""Is Buyer Team actually reachable? Checks the AWS resources this harness
+depends on directly: the Node 6 approval-gate Lambda (S4), the master-store /
+requisitions DynamoDB tables (S1), and the buyer-team Step Functions state
+machine. Not a full platform health check — just the seams this harness uses.
 """
 
 from __future__ import annotations
@@ -29,6 +29,22 @@ _INFORMATIVE_SOURCES = {"auto_priced", "supplier_response_seed"}
 
 _lambda_client = boto3.client("lambda", region_name=AWS_REGION)
 _ddb_resource = cast("DynamoDBServiceResource", boto3.resource("dynamodb", region_name=AWS_REGION))
+_sfn_client = boto3.client("stepfunctions", region_name=AWS_REGION)
+_state_machine_arn: str | None = None
+_state_machine_arn_resolved = False
+
+
+def resolve_state_machine_arn() -> str | None:
+    """The buyer-team state machine ARN doesn't change at runtime — cache it
+    so /traces doesn't call list_state_machines on every request."""
+    global _state_machine_arn, _state_machine_arn_resolved
+    if not _state_machine_arn_resolved:
+        machines = _sfn_client.list_state_machines()["stateMachines"]
+        _state_machine_arn = next(
+            (m["stateMachineArn"] for m in machines if "buyer-team" in m["name"]), None
+        )
+        _state_machine_arn_resolved = True
+    return _state_machine_arn
 
 
 def _classify_pricing_mode(bids: list[dict]) -> dict:
@@ -62,6 +78,8 @@ def check_buyer_team() -> dict:
         except ClientError as e:
             checks[label] = f"error: {e.response['Error']['Code']}"
 
+    checks["step_functions"] = _check_step_functions()
+
     pricing_info = _get_pricing_mode()
 
     healthy = all(v == "ok" for v in checks.values())
@@ -70,6 +88,17 @@ def check_buyer_team() -> dict:
     else:
         logger.warning("Buyer Team health check FAILED: %s", checks)
     return {"healthy": healthy, "checks": checks, **pricing_info}
+
+
+def _check_step_functions() -> str:
+    arn = resolve_state_machine_arn()
+    if arn is None:
+        return "error: state machine not found"
+    try:
+        status = _sfn_client.describe_state_machine(stateMachineArn=arn)["status"]
+        return "ok" if status == "ACTIVE" else f"error: status={status}"
+    except ClientError as e:
+        return f"error: {e.response['Error']['Code']}"
 
 
 def _get_pricing_mode() -> dict:
