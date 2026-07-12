@@ -39,7 +39,7 @@ pnpm dev          # → http://localhost:5174
 **Open the AWS dashboard** in a browser tab:
 
 ```url
-https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business
+https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-domain
 ```
 
 ---
@@ -225,9 +225,13 @@ The five suppliers:
 
 ## AWS Observability Walkthrough
 
-### 1. CloudWatch Business Dashboard
+### 1. CloudWatch Domain Dashboard
 
-URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business`
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-domain`
+
+> Formerly named "Business" — renamed to Domain to match the other three dashboards
+> (Application/FinOps/Platform). Token Usage moved to the FinOps dashboard only, so
+> it's no longer duplicated here.
 
 Thirteen widgets with **30-second refresh** (high-resolution metrics at 1-second
 storage resolution) reading the `procurement/business` namespace (emitted by
@@ -238,24 +242,23 @@ row (PRD-004 §2.3.3 KPI Summary):
 |--------|----------------------------|
 | **Negotiations Started vs Completed (by strategy)** | After each PR: a new "started" point appears. After approval+completion: a "completed" point follows. Breakout by strategy (SPOT_BID, COMPETITIVE_AUCTION, PARTNERSHIP_RISK, PARTNERSHIP_VALUE). |
 | **Negotiation Cycle Time (p50 / p99)** | How long negotiations take from start to completion. |
-| **Bids per Negotiation (avg)** | SPOT_BID → 1 bid (single invite). Leverage → 2-3 bids (multi-supplier auction). |
+| **Bids per Negotiation (avg) / SPOT_BID Response Rate (avg)** | SPOT_BID → 1 bid (single invite). Leverage → 2-3 bids (multi-supplier auction). |
 | **Governance Compliance Rate (avg)** | Running at 1.0 (100%) — no governance violations in the demo path. |
-| **Governance Violations (by type, stacked)** | Stays flat at 0 in a clean demo. Spikes if you trigger a guardrail breach. |
+| **Governance Violations (by type, stacked)** | Only has data when a violation actually occurred (last one was several days ago) — shows "No data available" rather than a flat 0 line in a clean window. Spikes if you trigger a guardrail breach. |
 | **Approvals (by status, stacked)** | Every HITL decision registers here — APPROVED, REJECTED, CYCLE_BACK. |
 | **Approval Wait Time (avg / p90)** | How long the negotiation sat in PENDING_APPROVAL before someone clicked Approve. |
 | **Negotiation Savings — Amount / Pct** | Dollar savings and percentage calculated against estimated unit price vs awarded amount. Best demo story: STRATEGIC HPT blade — $96k est. vs ~$88k awarded = ~8% savings. |
-| **Token Usage — Input / Output (by agent + model tier)** | LLM token consumption across all 6 agents during this negotiation. Spikes visibly when the strategy/negotiation agents run. |
 | **Kraljic Classification Source (by source, stacked)** | Shows how each PR was classified — `agent` (LLM-driven), `semantic_cache` (cache hit), `rule_based_fallback` (resilience path). |
 | **KPI: Award Rate / Spend Coverage Rate (avg)** | 1.0 on every completed award, 0.0 on REJECTED/CANCELLED terminal paths. |
-| **KPI: Cost Savings Rate (avg, by strategy)** | Same savings signal as the business-dashboard savings widget, expressed as a rate and broken out by strategy. |
+| **KPI: Cost Savings Rate (avg, by strategy)** | Same savings signal as the domain-dashboard savings widget, expressed as a rate and broken out by strategy. |
 | **KPI: Cycle Time — days (avg / p90, by quadrant)** | PR-`created_at` to PO-issued, in days, by Kraljic quadrant. |
-| **KPI: Supplier Response Rate (avg, by strategy)** | SPOT_BID auction rounds only — fraction of invited suppliers who responded. |
+| **KPI: Supplier Response Rate (avg, by strategy)** | SPOT_BID auction rounds **that exceed the `SPOT_BID_MAX_VALUE` auto-price threshold** (default $5,000) and go through the real agent — fraction of invited suppliers who responded. Low-value SPOT_BID PRs bypass the agent entirely (`node_strategy_execute.py` "auto_priced" path) and never touch this metric, so it reads "No data" unless a SPOT_BID PR's budget clears the threshold. |
 
 **Live demo script for the dashboard:**
 
 ```text
 "Every widget on this dashboard is driven by the same procurement business metrics —
-  not infrastructure metrics like CPU or memory. This is a business dashboard showing
+  not infrastructure metrics like CPU or memory. This is a domain dashboard showing
   negotiations, bids, approvals, savings, and compliance in real time.
 
   [Submit a STRATEGIC PR] — watch 'Negotiations Started' tick up.
@@ -264,20 +267,36 @@ row (PRD-004 §2.3.3 KPI Summary):
   'Savings Amount' registers the dollar savings from the LLM negotiation."
 ```
 
-### 2. CloudWatch Operations Dashboard
+### 2. CloudWatch Platform Dashboard
 
-URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-operations`
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-platform`
 
-Platform/SRE health, separate from the business dashboard above — 10 widgets: node
-Lambda errors/duration, Step Functions failed/timed-out executions, agent runtime
-errors/latency, main-queue backlog + DLQ depth, circuit-breaker failures/state
-changes, AD-034 evaluation scores, and adversarial robustness score. Useful if a
-demo run stalls — check here first for an infrastructure-level cause before
-assuming an orchestrator logic bug.
+> Formerly part of a single "Operations" dashboard, split into Platform (pure
+> AWS-resource metrics) + Application (below) so infra-level signal isn't mixed
+> with application-layer signal.
 
-### 3. CloudWatch Cost Dashboard
+Pure AWS-resource infra health — 8 widgets: node Lambda errors/duration, Step
+Functions executions failed/timed-out, agent runtime errors/latency (AgentCore,
+by runtime), main-queue backlog depth + oldest message age, DLQ depth (main +
+requires-attention), and the metrics-pipeline heartbeat. Useful if a demo run
+stalls — check here first for an infrastructure-level cause before assuming an
+orchestrator logic bug.
 
-URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-cost`
+### 3. CloudWatch Application Dashboard
+
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-application`
+
+Application-layer signal — is the code doing what it should, efficiently and
+safely — 9 widgets: circuit breaker failures/state changes, saga (compensation)
+executions/failures, award-retraction/bid-withdrawal notices, DLQ redrive
+outcomes, recovery/redrive lock health, the two REQUIRES_ATTENTION escalation
+triggers (negotiation timeout, Kraljic fallback rejection), AD-034 evaluation
+scores, adversarial robustness score, and the AgentCore online-eval scores for
+the Kraljic Classifier.
+
+### 4. CloudWatch FinOps Dashboard
+
+URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-finops`
 
 FinOps view reading the `procurement/cost` namespace — 4 widgets: token usage
 (input/output, by agent + model tier), cache read/write tokens, agent session
@@ -286,7 +305,7 @@ by strategy, from `negotiation.total_cost_usd`). The last widget is the best one
 to pull up after a STRATEGIC demo run — it shows the actual per-negotiation
 Bedrock spend.
 
-### 4. X-Ray Connected Trace (PR→PO)
+### 5. X-Ray Connected Trace (PR→PO)
 
 > **Easiest path during a demo:** Don't hunt through the trace list. Once a
 > negotiation reaches PENDING_APPROVAL, the Timeline tab header shows a
@@ -329,7 +348,7 @@ captures SDK calls across all 6 nodes.
 **Pro tip:** Sort by duration (longest first) — the STRATEGIC quadrant negotiation
 has the richest span detail (multi-round LLM negotiation).
 
-### 5. CloudWatch Logs
+### 6. CloudWatch Logs
 
 Key log groups:
 
@@ -361,7 +380,7 @@ not an anomaly.
 > errors), replace the `type` filter with
 > `| filter execution_arn like /<execution-arn-tail>/`.
 
-### 6. Agent Runtime Alarms
+### 7. Agent Runtime Alarms
 
 28 CloudWatch alarms cover the 6 AgentCore agent runtimes + the skill runtime +
 6 orchestrator node Lambdas + the Step Functions state machine (errors and
@@ -420,14 +439,17 @@ with savings accumulated across multiple strategies.
 ## Appendix: Console URLs (dev, us-east-1)
 
 ```
-CloudWatch Business Dashboard (30s refresh):
-  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-business
+CloudWatch Domain Dashboard (30s refresh):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-domain
 
-CloudWatch Operations Dashboard (platform/SRE health):
-  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-operations
+CloudWatch Platform Dashboard (AWS-resource infra health):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-platform
 
-CloudWatch Cost Dashboard (FinOps — token usage, cost per negotiation):
-  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-cost
+CloudWatch Application Dashboard (circuit breaker, resilience, eval quality):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-application
+
+CloudWatch FinOps Dashboard (token usage, cost per negotiation):
+  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-finops
 
 X-Ray Traces — Connected PR→PO trace (filter by tenant_id annotation):
   https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL
