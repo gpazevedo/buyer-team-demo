@@ -39,7 +39,7 @@ async def test_cost_dashboard_url_is_always_present(monkeypatch):
     assert urls["cost_dashboard"] == (
         f"https://{observer.AWS_REGION}.console.aws.amazon.com"
         f"/cloudwatch/home?region={observer.AWS_REGION}"
-        f"#dashboards:name={observer.ENV}-buyer-team-cost"
+        f"#dashboards:name={observer.ENV}-buyer-team-finops"
     )
     assert urls["sfn"] is None
     assert urls["xray"] is None

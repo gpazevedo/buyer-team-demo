@@ -222,7 +222,7 @@ async def get_trace_urls(negotiation_id: str):
         "xray": None,
         "cost_dashboard": (
             f"https://{AWS_REGION}.console.aws.amazon.com"
-            f"/cloudwatch/home?region={AWS_REGION}#dashboards:name={ENV}-buyer-team-cost"
+            f"/cloudwatch/home?region={AWS_REGION}#dashboards:name={ENV}-buyer-team-finops"
         ),
     }
 
