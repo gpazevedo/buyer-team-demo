@@ -218,20 +218,22 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
           <span className="flex items-center gap-1">
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                state?.total_cost_usd != null ? "bg-green-500" : "bg-gray-600"
+                traceUrls.cost_dashboard ? "bg-green-500" : "bg-gray-600"
               }`}
             />
-            {state?.total_cost_usd != null && traceUrls.cost_dashboard ? (
+            {traceUrls.cost_dashboard ? (
               <a
                 href={traceUrls.cost_dashboard}
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
               >
-                Est. Cost: ${state.total_cost_usd.toFixed(2)} ↗
+                {state?.total_cost_usd != null
+                  ? `Est. Cost: $${state.total_cost_usd.toFixed(2)} ↗`
+                  : "📊 Dashboard ↗"}
               </a>
             ) : (
-              <span className="text-xs text-gray-600">$$$</span>
+              <span className="text-xs text-gray-600">📊</span>
             )}
           </span>
         </div>

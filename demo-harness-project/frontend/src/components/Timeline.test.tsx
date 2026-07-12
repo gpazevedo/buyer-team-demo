@@ -196,10 +196,21 @@ describe("Timeline", () => {
     expect(screen.getByText("AWARDED")).toBeInTheDocument();
   });
 
-  it("shows a placeholder for the cost badge before any agent call has priced tokens", async () => {
+  it("shows a non-clickable placeholder before the cost dashboard URL resolves", async () => {
+    traces = { sfn: null, xray: null, cost_dashboard: null };
+
     render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
 
-    expect(await screen.findByText("$$$")).toBeInTheDocument();
+    const badge = await screen.findByText("📊");
+    expect(badge.closest("a")).toBeNull();
+    expect(screen.queryByText(/Est\. Cost/)).not.toBeInTheDocument();
+  });
+
+  it("links the dashboard emoji to the Cost Dashboard before any agent call has priced tokens", async () => {
+    render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
+
+    const link = await screen.findByText("📊 Dashboard ↗");
+    expect(link.closest("a")).toHaveAttribute("href", "https://example.com/cost-dashboard");
     expect(screen.queryByText(/Est\. Cost/)).not.toBeInTheDocument();
   });
 
