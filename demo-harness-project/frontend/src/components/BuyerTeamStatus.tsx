@@ -77,6 +77,17 @@ export default function BuyerTeamStatus() {
             ? "Fallback pricing (VPC/NAT down)"
             : "No recent bids"}
       </span>
+      <span
+        className="flex items-center gap-1.5 text-xs text-gray-400 cursor-help"
+        title={`step_functions: ${health.checks.step_functions ?? "unknown"}`}
+      >
+        <span
+          className={`w-2 h-2 rounded-full ${
+            health.checks.step_functions === "ok" ? "bg-green-500" : "bg-red-500"
+          }`}
+        />
+        Step Functions {health.checks.step_functions === "ok" ? "reachable" : "unreachable"}
+      </span>
     </span>
   );
 }
