@@ -6,7 +6,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from test_tenant_app.api import catalog, datasets, orders, requisitions
+from test_tenant_app.api import catalog, costs, datasets, orders, requisitions
 from test_tenant_app.observability import setup_tracing
 
 logger = structlog.get_logger()
@@ -46,6 +46,7 @@ app.include_router(datasets.router)
 app.include_router(requisitions.router)
 app.include_router(orders.router)
 app.include_router(catalog.router)
+app.include_router(costs.router)
 
 
 @app.get("/healthz", include_in_schema=False)

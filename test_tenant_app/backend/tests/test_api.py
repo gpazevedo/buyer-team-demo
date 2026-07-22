@@ -10,6 +10,7 @@ os.environ.setdefault("AUTH_MODE", "dev")
 from test_tenant_app.main import app  # noqa: E402
 from test_tenant_app.models import (  # noqa: E402
     Category,
+    CostPollResult,
     DatasetStatus,
     Item,
     PurchaseOrder,
@@ -134,3 +135,9 @@ def test_get_order():
 def test_get_order_not_found():
     r = client.get("/api/orders/does-not-exist")
     assert r.status_code == 404
+
+
+def test_poll_costs_shape():
+    r = client.post("/api/costs/poll")
+    assert r.status_code == 200
+    CostPollResult(**r.json())
