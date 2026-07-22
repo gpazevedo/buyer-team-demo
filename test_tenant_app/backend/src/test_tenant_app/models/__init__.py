@@ -1,3 +1,4 @@
+from .costs import CostPollResult
 from .datasets import DatasetStatus, KraljicThresholds, PhaseStatus
 from .domain import (
     Award,
@@ -40,4 +41,5 @@ __all__ = [
     "RejectOrderRequest",
     "RejectRequisitionRequest",
     "Trace",
+    "CostPollResult",
 ]
