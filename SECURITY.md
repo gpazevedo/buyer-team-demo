@@ -8,6 +8,7 @@ Report privately via [GitHub Security Advisories](https://github.com/gpazevedo/b
 You should receive an initial response within 5 business days.
 
 Include, where possible:
+
 - A description of the vulnerability and its impact
 - Steps to reproduce
 - Affected version/commit

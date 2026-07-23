@@ -221,6 +221,17 @@ The five suppliers:
 | Avionics Prime | BOTTLENECK | Avionics LRUs |
 | GlobalWheel Co | LEVERAGE | Wheels and tires |
 
+### 5. Browse the Requisitions tab
+
+Lists every Blue Jets PR submitted this session (`GET /demo/requisitions`). Click a row
+to expand its line items and pull the current negotiation state (bids, award, PO) inline
+— useful for checking on a PR you submitted earlier without leaving the list, or for
+jumping straight into its live Timeline via the "Open live Timeline →" link.
+
+The header also shows a small **UTC clock** (local time labeled with its actual UTC
+offset) next to the tab bar — handy for cross-referencing CloudWatch/X-Ray timestamps,
+which are always UTC, against what you saw on screen.
+
 ---
 
 ## AWS Observability Walkthrough
@@ -233,7 +244,7 @@ URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#
 > (Application/FinOps/Platform). Token Usage moved to the FinOps dashboard only, so
 > it's no longer duplicated here.
 
-Thirteen widgets with **30-second refresh** (high-resolution metrics at 1-second
+Eighteen widgets with **30-second refresh** (high-resolution metrics at 1-second
 storage resolution) reading the `procurement/business` namespace (emitted by
 `orchestrator/resilience/metrics.py` across all node Lambdas) plus a `procurement/kpi`
 row (PRD-004 §2.3.3 KPI Summary):
@@ -253,6 +264,11 @@ row (PRD-004 §2.3.3 KPI Summary):
 | **KPI: Cost Savings Rate (avg, by strategy)** | Same savings signal as the domain-dashboard savings widget, expressed as a rate and broken out by strategy. |
 | **KPI: Cycle Time — days (avg / p90, by quadrant)** | PR-`created_at` to PO-issued, in days, by Kraljic quadrant. |
 | **KPI: Supplier Response Rate (avg, by strategy)** | SPOT_BID auction rounds **that exceed the `SPOT_BID_MAX_VALUE` auto-price threshold** (default $5,000) and go through the real agent — fraction of invited suppliers who responded. Low-value SPOT_BID PRs bypass the agent entirely (`node_strategy_execute.py` "auto_priced" path) and never touch this metric, so it reads "No data" unless a SPOT_BID PR's budget clears the threshold. |
+| **Bid Evaluation Source (by source, stacked)** | Same idea as Kraljic Classification Source, one node downstream — how Node 5 arrived at its evaluation/ranking. |
+| **KPI: Automation Rate (avg, all_tenants + by tenant_id)** | Daily rollup (`kpi_rollup` Lambda) — fraction of negotiations that completed with no human touch (SPOT_BID auto-approve path). |
+| **KPI: Error Rate — agent-invocation (avg, daily rollup)** | Daily rollup of the agent-invocation-only failure rate. |
+| **KPI: Pipeline Error Rate — retry/compensation/outbox/breaker (avg, daily rollup)** | Broader denominator than the agent-invocation error rate above — retry/compensation/outbox/circuit-breaker failures over total node Lambda invocations. |
+| **KPI by Variant: Kraljic Agent Decisions (by variant, stacked)** | Canary-by-tenant: groups agent-served Kraljic classifications by which variant decided them (explicit per-tenant pin vs. population-level A/B hash-split). Only agent-sourced classifications carry a `variant` dimension. |
 
 **Live demo script for the dashboard:**
 
@@ -275,10 +291,12 @@ URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#
 > AWS-resource metrics) + Application (below) so infra-level signal isn't mixed
 > with application-layer signal.
 
-Pure AWS-resource infra health — 8 widgets: node Lambda errors/duration, Step
+Pure AWS-resource infra health — 9 widgets: node Lambda errors/duration, Step
 Functions executions failed/timed-out, agent runtime errors/latency (AgentCore,
 by runtime), main-queue backlog depth + oldest message age, DLQ depth (main +
-requires-attention), and the metrics-pipeline heartbeat. Useful if a demo run
+requires-attention), the metrics-pipeline heartbeat, and native `AWS/States`
+execution time (avg/p99 — spans include the up-to-96h HITL approval wait, so a
+high p99 during a demo isn't a red flag by itself). Useful if a demo run
 stalls — check here first for an infrastructure-level cause before assuming an
 orchestrator logic bug.
 
@@ -298,12 +316,17 @@ the Kraljic Classifier.
 
 URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-finops`
 
-FinOps view reading the `procurement/cost` namespace — 4 widgets: token usage
-(input/output, by agent + model tier), cache read/write tokens, agent session
-duration by tenant (a cost-per-tenant proxy), and cost per negotiation (sum/avg
-by strategy, from `negotiation.total_cost_usd`). The last widget is the best one
-to pull up after a STRATEGIC demo run — it shows the actual per-negotiation
-Bedrock spend.
+Mostly the `procurement/cost` namespace — 8 widgets: token usage (input/output,
+by agent + model tier), cost per negotiation (sum/avg by strategy, from
+`negotiation.total_cost_usd`), AWS Cost by Service (hourly, from the daily
+`finops_cost_poller` Cost Explorer poll — not exposed in this harness's own UI,
+only on this dashboard), cache read/write tokens, cache hit rate, agent
+invocation success rate (this one reads `procurement/resilience`, not
+`procurement/cost`), agent session duration by tenant (a cost-per-tenant proxy),
+and unpriced model invocations (any model ID outside the 4 seeded rate-card
+entries — a pricing-data gap, not a cost signal by itself). The cost-per-negotiation
+widget is the best one to pull up after a STRATEGIC demo run — it shows the actual
+per-negotiation Bedrock spend.
 
 ### 5. X-Ray Connected Trace (PR→PO)
 

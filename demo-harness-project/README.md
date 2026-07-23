@@ -24,19 +24,23 @@ It observes and drives the real orchestrator through its existing seams only:
 
 ## Layout
 
-```
+```text
 backend/src/demo_harness/
   config.py           env-driven settings (table names, tenant id, poll interval)
+  health.py           /demo/health checks (approval-gate Lambda, master-store tables, SFN) + pricing-mode detection
   seed.py             idempotent Blue Jets tenant/category/item/supplier seed
   reset_demo.py       idempotent Blue Jets runtime data cleanup (keeps seed data)
   pr_generator.py     builds + submits a PR for a given Kraljic quadrant
   offer_projection.py background poll loop + in-memory per-negotiation projection
-  observer.py         FastAPI routes: negotiation snapshot/stream, approve, requisitions, suppliers
+  observer.py         FastAPI routes: health, negotiation snapshot/stream, approve, requisitions, suppliers, traces
   main.py             app wiring, lifespan (starts the poll loop), /demo/seed admin routes
 
 frontend/src/
-  App.tsx                        tab shell (New PR / Timeline / Suppliers)
+  App.tsx                        tab shell (New PR / Requisitions / Timeline / Suppliers)
+  components/BuyerTeamStatus.tsx header badges: Buyer Team reachability + pricing-mode (live/fallback), polls /demo/health
+  components/UtcClock.tsx        header clock showing local time labeled with its UTC offset
   components/PRForm.tsx          quadrant + quantity form -> POST /demo/requisitions
+  components/PRList.tsx          Requisitions tab: expandable PR list with per-PR negotiation state, links into Timeline
   components/Timeline.tsx        SSE-driven negotiation view (bids, approval, award, PO)
   components/ApprovalControls.tsx Approve / Reject / Cycle Back buttons
   components/OfferCard.tsx       one supplier's bid
@@ -107,6 +111,10 @@ returned `negotiation_id` and updates live as the orchestrator processes it — 
 arriving, status changes, and (for `BOTTLENECK`/`STRATEGIC`, or `LEVERAGE` over $5k) an
 **Approve / Reject / Cycle Back** panel once the negotiation reaches
 `PENDING_APPROVAL`.
+
+The **Requisitions** tab lists every Blue Jets PR (`GET /demo/requisitions`); click one to
+expand its line items and current negotiation state (bids, award, PO) inline, or jump
+straight into its live Timeline.
 
 **Via the API directly:**
 
