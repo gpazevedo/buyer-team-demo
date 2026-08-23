@@ -46,7 +46,11 @@ const baseSnapshot = {
 
 describe("Timeline", () => {
   let snapshot: typeof baseSnapshot;
-  let traces: { sfn: string | null; xray: string | null; cost_dashboard: string | null };
+  let traces: {
+    sfn: string | null;
+    xray: string | null;
+    dashboards: { platform: string | null; finops: string | null; business: string | null };
+  };
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -56,7 +60,15 @@ describe("Timeline", () => {
     vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
 
     snapshot = { ...baseSnapshot };
-    traces = { sfn: null, xray: null, cost_dashboard: "https://example.com/cost-dashboard" };
+    traces = {
+      sfn: null,
+      xray: null,
+      dashboards: {
+        platform: "https://example.com/dashboard-platform",
+        finops: "https://example.com/dashboard-finops",
+        business: "https://example.com/dashboard-business",
+      },
+    };
 
     fetchMock = vi.fn((url: string) => {
       if (url.endsWith("/traces")) {
@@ -110,7 +122,15 @@ describe("Timeline", () => {
   it("stops polling for trace URLs once both SFN and X-Ray links are found", async () => {
     vi.useFakeTimers();
     try {
-      traces = { sfn: "https://example.com/sfn", xray: null, cost_dashboard: "https://example.com/cost-dashboard" };
+      traces = {
+        sfn: "https://example.com/sfn",
+        xray: null,
+        dashboards: {
+          platform: "https://example.com/dashboard-platform",
+          finops: "https://example.com/dashboard-finops",
+          business: "https://example.com/dashboard-business",
+        },
+      };
       render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
@@ -124,7 +144,11 @@ describe("Timeline", () => {
       traces = {
         sfn: "https://example.com/sfn",
         xray: "https://example.com/xray",
-        cost_dashboard: "https://example.com/cost-dashboard",
+        dashboards: {
+          platform: "https://example.com/dashboard-platform",
+          finops: "https://example.com/dashboard-finops",
+          business: "https://example.com/dashboard-business",
+        },
       };
       await act(async () => {
         await vi.advanceTimersByTimeAsync(10_000);
@@ -196,30 +220,43 @@ describe("Timeline", () => {
     expect(screen.getByText("AWARDED")).toBeInTheDocument();
   });
 
-  it("shows a non-clickable placeholder before the cost dashboard URL resolves", async () => {
-    traces = { sfn: null, xray: null, cost_dashboard: null };
+  it("shows non-clickable dashboard buttons before the dashboard URLs resolve", async () => {
+    traces = {
+      sfn: null,
+      xray: null,
+      dashboards: { platform: null, finops: null, business: null },
+    };
 
     render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
 
-    const badge = await screen.findByText("📊");
-    expect(badge.closest("a")).toBeNull();
+    const platform = await screen.findByText("Platform");
+    expect(platform.closest("a")).toBeNull();
     expect(screen.queryByText(/Est\. Cost/)).not.toBeInTheDocument();
   });
 
-  it("links the dashboard emoji to the Cost Dashboard before any agent call has priced tokens", async () => {
+  it("links each dashboard button to its CloudWatch dashboard", async () => {
     render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
 
-    const link = await screen.findByText("📊 Dashboard ↗");
-    expect(link.closest("a")).toHaveAttribute("href", "https://example.com/cost-dashboard");
-    expect(screen.queryByText(/Est\. Cost/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Platform" })).toHaveAttribute(
+      "href",
+      "https://example.com/dashboard-platform"
+    );
+    expect(screen.getByRole("link", { name: "FinOps" })).toHaveAttribute(
+      "href",
+      "https://example.com/dashboard-finops"
+    );
+    expect(screen.getByRole("link", { name: "Business" })).toHaveAttribute(
+      "href",
+      "https://example.com/dashboard-business"
+    );
   });
 
-  it("shows the estimated cost as a link to the Cost Dashboard once available", async () => {
+  it("shows the estimated cost as a label once available", async () => {
     snapshot = { ...snapshot, total_cost_usd: 2.1445 };
 
     render(<Timeline negotiationId="neg-1" initialQuadrant={null} />);
 
-    const link = await screen.findByText("Est. Cost: $2.14 ↗");
-    expect(link.closest("a")).toHaveAttribute("href", "https://example.com/cost-dashboard");
+    const cost = await screen.findByText("Est. Cost: $2.14");
+    expect(cost.closest("a")).toBeNull();
   });
 });

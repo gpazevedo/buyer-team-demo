@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
 import ApprovalControls from "./ApprovalControls";
+import SfnGraph from "./SfnGraph";
 
 type NegotiationState = {
   negotiation_id: string;
@@ -61,10 +62,14 @@ const QUADRANT_COLORS: Record<string, string> = {
 export default function Timeline({ negotiationId, initialQuadrant }: { negotiationId: string | null; initialQuadrant: string | null }) {
   const [state, setState] = useState<NegotiationState | null>(null);
   const [events, setEvents] = useState<string[]>([]);
-  const [traceUrls, setTraceUrls] = useState<{ sfn: string | null; xray: string | null; cost_dashboard: string | null }>({
+  const [traceUrls, setTraceUrls] = useState<{
+    sfn: string | null;
+    xray: string | null;
+    dashboards: { platform: string | null; finops: string | null; business: string | null } | null;
+  }>({
     sfn: null,
     xray: null,
-    cost_dashboard: null,
+    dashboards: null,
   });
 
   useEffect(() => {
@@ -81,11 +86,11 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
         .then((urls) => {
           // Each field keeps its last known value if this poll didn't
           // resolve it (e.g. a transient describe_execution failure) —
-          // cost_dashboard is static so it always sticks from the first poll.
+          // dashboards is static so it always sticks from the first poll.
           setTraceUrls((prev) => ({
             sfn: urls.sfn || prev.sfn,
             xray: urls.xray || prev.xray,
-            cost_dashboard: urls.cost_dashboard || prev.cost_dashboard,
+            dashboards: urls.dashboards || prev.dashboards,
           }));
           if (urls.sfn && urls.xray) clearInterval(traceInterval);
         })
@@ -215,29 +220,43 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
               </span>
             )}
           </span>
-          <span className="flex items-center gap-1">
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${
-                traceUrls.cost_dashboard ? "bg-green-500" : "bg-gray-600"
-              }`}
-            />
-            {traceUrls.cost_dashboard ? (
+        </div>
+        <div className="flex items-center gap-2 mt-1">
+          {state?.total_cost_usd != null && (
+            <span className="text-xs text-gray-500">
+              Est. Cost: ${state.total_cost_usd.toFixed(2)}
+            </span>
+          )}
+          <span className="text-xs text-gray-600">Dashboards:</span>
+          {[
+            { label: "Platform", url: traceUrls.dashboards?.platform },
+            { label: "FinOps", url: traceUrls.dashboards?.finops },
+            { label: "Business", url: traceUrls.dashboards?.business },
+          ].map((d) =>
+            d.url ? (
               <a
-                href={traceUrls.cost_dashboard}
+                key={d.label}
+                href={d.url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-xs text-gray-300 hover:text-blue-400 hover:border-blue-700 transition-colors"
               >
-                {state?.total_cost_usd != null
-                  ? `Est. Cost: $${state.total_cost_usd.toFixed(2)} ↗`
-                  : "📊 Dashboard ↗"}
+                {d.label}
               </a>
             ) : (
-              <span className="text-xs text-gray-600">📊</span>
-            )}
-          </span>
+              <span
+                key={d.label}
+                className="px-2 py-0.5 rounded bg-gray-800 border border-gray-700 text-xs text-gray-600"
+              >
+                {d.label}
+              </span>
+            )
+          )}
         </div>
       </div>
+
+      {/* Step Functions execution graph */}
+      <SfnGraph negotiationId={negotiationId} />
 
       {/* Progress bar */}
       {state && (

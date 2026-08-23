@@ -44,7 +44,7 @@ export default function BuyerTeamStatus() {
   }
 
   return (
-    <span className="flex items-center gap-7">
+    <span className="flex items-center gap-4">
       <span
         className="flex items-center gap-1.5 text-xs text-gray-400 cursor-help"
         title={Object.entries(health.checks)
