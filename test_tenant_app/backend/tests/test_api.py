@@ -137,6 +137,18 @@ def test_get_order_not_found():
     assert r.status_code == 404
 
 
+def test_get_order_pdf():
+    r = client.get("/api/orders/po-stub-001/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+
+
+def test_get_order_pdf_not_found():
+    r = client.get("/api/orders/does-not-exist/pdf")
+    assert r.status_code == 404
+
+
 def test_poll_costs_shape():
     r = client.post("/api/costs/poll")
     assert r.status_code == 200
