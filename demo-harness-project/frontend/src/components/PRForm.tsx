@@ -131,7 +131,6 @@ export default function PRForm({ onCreated }: { onCreated: (negId: string, quadr
             value={quantity}
             onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
             min={1}
-            max={100}
             className="w-32 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm"
           />
         </div>
