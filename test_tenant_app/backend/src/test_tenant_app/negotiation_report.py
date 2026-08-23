@@ -33,11 +33,15 @@ _ACCENT_BG = colors.HexColor("#eef2ff")
 _ROW_ALT_BG = colors.HexColor("#f9fafb")
 _GRID_COLOR = colors.HexColor("#d1d5db")
 
+
 # Table cells wrap long text via Paragraph — a plain string in a reportlab Table
 # never wraps and silently overflows into the next column instead.
 def _cell(text: str, font_size: float = 8.5) -> Paragraph:
-    style = ParagraphStyle(f"cell{font_size}", fontName="Helvetica", fontSize=font_size, leading=font_size + 2)
+    style = ParagraphStyle(
+        f"cell{font_size}", fontName="Helvetica", fontSize=font_size, leading=font_size + 2
+    )
     return Paragraph(text, style)
+
 
 # Kraljic quadrant -> (strategy label, one-line description). Mirrors
 # master_data_client._STRATEGY_NODE and the orchestrator's quadrant -> strategy
@@ -59,8 +63,7 @@ _STRATEGY = {
     ),
     "strategic": (
         "STRATEGIC_PARTNERSHIP",
-        "High risk, high value — structured negotiation toward a long-term "
-        "strategic partnership.",
+        "High risk, high value — structured negotiation toward a long-term strategic partnership.",
     ),
 }
 
@@ -127,7 +130,10 @@ class _LLMCall:
 
     @property
     def cost_usd(self) -> float:
-        return self.input_tokens / 1000 * self.input_rate + self.output_tokens / 1000 * self.output_rate
+        return (
+            self.input_tokens / 1000 * self.input_rate
+            + self.output_tokens / 1000 * self.output_rate
+        )
 
 
 @dataclass
@@ -228,7 +234,9 @@ def _build_negotiations(tenant_id: str, pr: PurchaseRequisition) -> list[_Catego
     return negotiations
 
 
-def _llm_call(purpose: str, model: tuple[str, str, float, float], input_tokens: int, output_tokens: int) -> _LLMCall:
+def _llm_call(
+    purpose: str, model: tuple[str, str, float, float], input_tokens: int, output_tokens: int
+) -> _LLMCall:
     name, model_id, input_rate, output_rate = model
     return _LLMCall(purpose, name, model_id, input_tokens, output_tokens, input_rate, output_rate)
 

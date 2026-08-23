@@ -86,9 +86,7 @@ def _line_items_table(po: PurchaseOrder) -> Table:
         ]
         for li in po.line_items
     ]
-    table = Table(
-        rows, colWidths=[1.3 * inch, 2.6 * inch, 0.6 * inch, 0.9 * inch, 1.0 * inch]
-    )
+    table = Table(rows, colWidths=[1.3 * inch, 2.6 * inch, 0.6 * inch, 0.9 * inch, 1.0 * inch])
     table.setStyle(
         TableStyle(
             [
