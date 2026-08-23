@@ -183,6 +183,46 @@ def approve_negotiation(requisition_id: str, body: ApproveRequest):
 
 # ── Trace resolution ──────────────────────────────────────────────
 
+# State machine happy-path node order, matching DEMO-GUIDE §4 and the
+# ProgressBar narrative. The internal Check*/Terminated/Failed choice plumbing
+# only routes to error/retry branches — it never blocks or shows progress on the
+# success path, so it's omitted from the display graph.
+SFN_GRAPH_STATES = [
+    "IngestValidate",
+    "KraljicClassify",
+    "RouteStrategy",
+    "StrategyExecute",
+    "BidEvaluation",
+    "ApprovalGate",
+    "AwardComms",
+    "Done",
+]
+
+
+def _dashboard_url(dashboard_name: str) -> str:
+    """CloudWatch dashboard console URL for the current ENV/region."""
+    return (
+        f"https://{AWS_REGION}.console.aws.amazon.com"
+        f"/cloudwatch/home?region={AWS_REGION}#dashboards:name={dashboard_name}"
+    )
+
+
+def _execution_arn(negotiation_id: str) -> str | None:
+    """Execution ARN for a negotiation — the execution name is deterministic
+    (neg-{negotiation_id})."""
+    arn = resolve_state_machine_arn()
+    if not arn:
+        return None
+    return f"{arn.replace('stateMachine', 'execution')}:neg-{negotiation_id}"
+
+
+def _execution_console_url(exec_arn: str) -> str:
+    return (
+        f"https://{AWS_REGION}.console.aws.amazon.com"
+        f"/states/home?region={AWS_REGION}"
+        f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
+    )
+
 
 def _trace_id_from_header(trace_header: str | None) -> str | None:
     """Extract the X-Ray trace ID (``Root=...``) from an execution's traceHeader."""
@@ -194,31 +234,89 @@ def _trace_id_from_header(trace_header: str | None) -> str | None:
     return None
 
 
+def _sfn_execution_graph(exec_arn: str) -> dict:
+    """Execution status + per-canonical-state progress for one SFN execution.
+
+    Parses the type-specific state events (TaskStateEntered/Exited,
+    ChoiceStateEntered/Exited, SucceedStateEntered/Exited, …) from the execution
+    history. A state that was entered but hasn't exited yet is the one currently
+    running — ApprovalGate sits there during the HITL pause.
+    """
+    status = _sfn_client.describe_execution(executionArn=exec_arn).get("status")
+
+    entered: list[str] = []
+    exited: set[str] = set()
+    history = _sfn_client.get_execution_history(executionArn=exec_arn, maxResults=200)
+    events = history.get("events", [])
+    while history.get("nextToken"):
+        history = _sfn_client.get_execution_history(
+            executionArn=exec_arn, maxResults=200, nextToken=history["nextToken"]
+        )
+        events += history.get("events", [])
+
+    # State events arrive as type-specific event types (TaskStateEntered,
+    # ChoiceStateEntered, …) but boto3 normalizes the details into the generic
+    # stateEnteredEventDetails / stateExitedEventDetails keys.
+    for ev in events:
+        ev_type = ev["type"]
+        if ev_type.endswith("StateEntered"):
+            name = (ev.get("stateEnteredEventDetails") or {}).get("name")
+            if name and name not in entered:
+                entered.append(name)
+        elif ev_type.endswith("StateExited"):
+            name = (ev.get("stateExitedEventDetails") or {}).get("name")
+            if name:
+                exited.add(name)
+
+    def _status(name: str) -> str:
+        if name not in entered:
+            return "pending"
+        if name in exited:
+            return "succeeded"
+        return "running" if status == "RUNNING" else "failed"
+
+    return {
+        "execution_status": status,
+        "states": [{"name": s, "status": _status(s)} for s in SFN_GRAPH_STATES],
+    }
+
+
+@router.get("/negotiations/{negotiation_id}/sfn")
+async def get_sfn_graph(negotiation_id: str):
+    """SFN execution progress for a negotiation: overall status, a status per
+    canonical state (pending/running/succeeded/failed), and the console URL."""
+    exec_arn = _execution_arn(negotiation_id)
+    if not exec_arn:
+        raise HTTPException(status_code=503, detail="State machine not found")
+    try:
+        graph = _sfn_execution_graph(exec_arn)
+    except Exception:
+        logger.exception("SFN graph resolution failed for %s", negotiation_id)
+        raise HTTPException(status_code=404, detail="Execution not found")
+    graph["url"] = _execution_console_url(exec_arn)
+    return graph
+
+
 @router.get("/negotiations/{negotiation_id}/traces")
 async def get_trace_urls(negotiation_id: str):
     """Resolve SFN execution + X-Ray trace URLs for a negotiation, plus the
-    (negotiation-agnostic) Cost Dashboard URL — same response since the
+    three (negotiation-agnostic) dashboard URLs — same response since the
     frontend already polls this endpoint for the trace-link row."""
     urls: dict = {
         "sfn": None,
         "xray": None,
-        "cost_dashboard": (
-            f"https://{AWS_REGION}.console.aws.amazon.com"
-            f"/cloudwatch/home?region={AWS_REGION}#dashboards:name={ENV}-buyer-team-finops"
-        ),
+        "dashboards": {
+            "platform": _dashboard_url(f"{ENV}-buyer-team-platform"),
+            "finops": _dashboard_url(f"{ENV}-buyer-team-finops"),
+            "business": _dashboard_url(f"{ENV}-buyer-team-domain"),
+        },
     }
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
     try:
-        arn = resolve_state_machine_arn()
-        if arn:
-            name = f"neg-{negotiation_id}"
-            exec_arn = f"{arn.replace('stateMachine', 'execution')}:{name}"
-            urls["sfn"] = (
-                f"https://{AWS_REGION}.console.aws.amazon.com"
-                f"/states/home?region={AWS_REGION}"
-                f"#/executions/details/{exec_arn.replace(':', '%3A').replace('/', '%2F')}"
-            )
+        exec_arn = _execution_arn(negotiation_id)
+        if exec_arn:
+            urls["sfn"] = _execution_console_url(exec_arn)
             # DescribeExecution's traceHeader carries the execution's own X-Ray
             # trace ID (active tracing is enabled on the state machine) — a real
             # lookup, not a duration/start-time guess against get_trace_summaries.

@@ -27,16 +27,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
-      <header className="border-b border-gray-800 px-8 py-4">
+      <header className="border-b border-gray-800 px-8 py-2">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold tracking-tight">Buyer Team</h1>
-            <p className="text-sm text-gray-400">Lifecycle Demo — Blue Jets</p>
-            <div className="mt-1">
-              <BuyerTeamStatus />
-            </div>
+            <span className="text-sm text-gray-400">Lifecycle Demo — Blue Jets</span>
+            <BuyerTeamStatus />
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-4">
             <UtcClock />
             <div className="flex gap-2">
               {tabs.map((t) => (
@@ -59,7 +57,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      <main className="p-8">
+      <main className="px-8 py-4">
         <Suspense fallback={<div className="text-gray-400">Loading...</div>}>
           {activeTab === "pr" && (
             <PRForm onCreated={(negId, quadrant) => {

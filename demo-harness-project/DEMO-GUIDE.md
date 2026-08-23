@@ -48,7 +48,7 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashbo
 
 1. Open `http://localhost:5174` — the header shows a green "Buyer Team reachable" badge and a second pricing-mode badge: green "LLM agents reachable" when live Bedrock pricing is flowing, amber "Fallback pricing (VPC/NAT down)" when the resilience fallback is active, or gray "No recent bids" if nothing has priced yet. Hover it for the `pricing_mode_source`.
 2. Pick **Strategic** (HPT blade set, $96k/unit), quantity 1, click **Submit PR**.
-3. You are auto-switched to the **Timeline** tab. The progress bar shows: Ingest → Strategy → Evaluate → Approval → Award → PO Issued.
+3. You are auto-switched to the **Timeline** tab. A live **Step Functions** graph shows the 8-state orchestrator run: each state lights up green as it completes, the current one pulses amber. The progress bar below shows: Ingest → Strategy → Evaluate → Approval → Award → PO Issued.
 4. Watch offers arrive from TurbineTech OEM (the only STRATEGIC supplier). Each new offer pops in via SSE.
 5. The timeline pauses at **PENDING_APPROVAL** with a yellow "Human Approval Required" panel. Click **Approve**.
 6. The negotiation transitions through APPROVED → AWARDED → COMPLETED. A green "Purchase Order" section appears.
@@ -157,15 +157,16 @@ second. No mock data — every update is the real orchestrator writing to `{env}
 
 **What you see, in order:**
 
-1. **Progress bar** — light-blue filled segments advance: Ingest → Strategy → Evaluate → Approval → Award → PO Issued. The active segment pulses.
-2. **Quadrant + strategy badges** — e.g. `STRATEGIC` (red) + `PARTNERSHIP_VALUE`.
-3. **Invitations sent** — supplier names appear as they are invited to bid. Auto-priced strategies (SPOT_BID, COMPETITIVE_AUCTION) show synthetic invitations derived from bid data since the orchestrator bypasses the agent.
-4. **Auction Round Feedback** — for multi-round auction strategies, rank/feedback updates appear after each round.
-5. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
-6. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
-7. **Award** — green card with awarded supplier, total amount, and savings.
-8. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
-9. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
+1. **Step Functions graph** — the live orchestrator execution, one chip per canonical state: `IngestValidate → KraljicClassify → RouteStrategy → StrategyExecute → BidEvaluation → ApprovalGate → AwardComms → Done`. Chips are gray (pending), green (succeeded), amber and pulsing (currently running), red (failed). `ApprovalGate` sits pulsing amber while the HITL pause is active. A "SFN Console ↗" link jumps to the real execution in the AWS console. (The graph polls the backend's `/sfn` endpoint every 5s; the internal `Check*`/`Terminated`/`Failed` choice plumbing is omitted since it never blocks or shows progress on the happy path.)
+2. **Progress bar** — light-blue filled segments advance: Ingest → Strategy → Evaluate → Approval → Award → PO Issued. The active segment pulses.
+3. **Quadrant + strategy badges** — e.g. `STRATEGIC` (red) + `PARTNERSHIP_VALUE`.
+4. **Invitations sent** — supplier names appear as they are invited to bid. Auto-priced strategies (SPOT_BID, COMPETITIVE_AUCTION) show synthetic invitations derived from bid data since the orchestrator bypasses the agent.
+5. **Auction Round Feedback** — for multi-round auction strategies, rank/feedback updates appear after each round.
+6. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
+7. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
+8. **Award** — green card with awarded supplier, total amount, and savings.
+9. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
+10. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
 
 **The status flow** (normalized for the UI — raw orchestrator statuses are mapped by `dynamo_client._NEG_STATUS`):
 
@@ -236,6 +237,12 @@ which are always UTC, against what you saw on screen.
 
 ## AWS Observability Walkthrough
 
+Every dashboard below is reachable with one click: the Timeline header shows
+**Platform / FinOps / Business** buttons (each linking to its CloudWatch dashboard)
+next to the **SFN Trace ↗** and **X-Ray Trace ↗** links and the estimated cost. The
+buttons render as plain labels until the backend resolves their URLs (~a second
+after the negotiation snapshot loads).
+
 ### 1. CloudWatch Domain Dashboard
 
 URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-domain`
@@ -288,31 +295,34 @@ row (PRD-004 §2.3.3 KPI Summary):
 URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-platform`
 
 > Formerly part of a single "Operations" dashboard, split into Platform (pure
-> AWS-resource metrics) + Application (below) so infra-level signal isn't mixed
-> with application-layer signal.
+> AWS-resource metrics) + Application (application-layer signal) so
+> infra-level signal wasn't mixed with application-layer signal. As of
+> 2026-08-12 (PR #265) the Application dashboard was merged back into
+> Platform for free-tier dashboard-count limits, so this single dashboard now
+> carries both halves — there is no separate `dev-buyer-team-application`
+> dashboard any more. Confirm the live list before relying on this doc:
+> `aws cloudwatch list-dashboards --query 'DashboardEntries[*].DashboardName'`.
 
-Pure AWS-resource infra health — 9 widgets: node Lambda errors/duration, Step
-Functions executions failed/timed-out, agent runtime errors/latency (AgentCore,
-by runtime), main-queue backlog depth + oldest message age, DLQ depth (main +
+~18 widgets combining pure AWS-resource infra health and application-layer
+signal:
+
+**Infra health:** node Lambda errors/duration, Step Functions executions
+failed/timed-out, agent runtime errors/latency (AgentCore, by runtime),
+main-queue backlog depth + oldest message age, DLQ depth (main +
 requires-attention), the metrics-pipeline heartbeat, and native `AWS/States`
 execution time (avg/p99 — spans include the up-to-96h HITL approval wait, so a
 high p99 during a demo isn't a red flag by itself). Useful if a demo run
 stalls — check here first for an infrastructure-level cause before assuming an
 orchestrator logic bug.
 
-### 3. CloudWatch Application Dashboard
+**Application-layer signal:** circuit breaker failures/state changes, saga
+(compensation) executions/failures, award-retraction/bid-withdrawal notices,
+DLQ redrive outcomes, recovery/redrive lock health, the two
+REQUIRES_ATTENTION escalation triggers (negotiation timeout, Kraljic fallback
+rejection), AD-034 evaluation scores, adversarial robustness score, and the
+AgentCore online-eval scores for the Kraljic Classifier.
 
-URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-application`
-
-Application-layer signal — is the code doing what it should, efficiently and
-safely — 9 widgets: circuit breaker failures/state changes, saga (compensation)
-executions/failures, award-retraction/bid-withdrawal notices, DLQ redrive
-outcomes, recovery/redrive lock health, the two REQUIRES_ATTENTION escalation
-triggers (negotiation timeout, Kraljic fallback rejection), AD-034 evaluation
-scores, adversarial robustness score, and the AgentCore online-eval scores for
-the Kraljic Classifier.
-
-### 4. CloudWatch FinOps Dashboard
+### 3. CloudWatch FinOps Dashboard
 
 URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-finops`
 
@@ -328,15 +338,17 @@ entries — a pricing-data gap, not a cost signal by itself). The cost-per-negot
 widget is the best one to pull up after a STRATEGIC demo run — it shows the actual
 per-negotiation Bedrock spend.
 
-### 5. X-Ray Connected Trace (PR→PO)
+### 4. X-Ray Connected Trace (PR→PO)
 
 > **Easiest path during a demo:** Don't hunt through the trace list. Once a
 > negotiation reaches PENDING_APPROVAL, the Timeline tab header shows a
 > **"SFN Trace ↗"** link (always present) and, after 30-60s for X-Ray indexing,
 > a **"X-Ray Trace ↗"** link (green dot when resolved, red pulsing dot while
 > indexing). Click either to jump straight to the trace for *this* negotiation.
-> The generic filter instructions below are useful when you want to browse
-> multiple traces at once (e.g. the "run all four quadrants" walkthrough).
+> The same header row also carries the **Platform / FinOps / Business** dashboard
+> buttons (see the Walkthrough intro above). The generic filter instructions below
+> are useful when you want to browse multiple traces at once (e.g. the "run all
+> four quadrants" walkthrough).
 
 URL: `https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL`
 
@@ -368,10 +380,18 @@ captures SDK calls across all 6 nodes.
    or filter by `annotation.procurement.tenant_id IS NOT NULL`.
 4. Open a trace — the waterfall shows all 6 node spans in sequence.
 
+> The trace-list query box has been unreliable in practice — pressing Enter
+> in the filter field can insert a newline instead of submitting, and a
+> "syntax error" banner can appear and persist even for the correct
+> `annotation.procurement.tenant_id IS NOT NULL` filter. The "Easiest path"
+> callout above (pulling the resolved trace URL straight from a negotiation's
+> Timeline tab) sidesteps the query box entirely and is the more reliable
+> option when this list-filtering approach misbehaves.
+
 **Pro tip:** Sort by duration (longest first) — the STRATEGIC quadrant negotiation
 has the richest span detail (multi-round LLM negotiation).
 
-### 6. CloudWatch Logs
+### 5. CloudWatch Logs
 
 Key log groups:
 
@@ -403,7 +423,7 @@ not an anomaly.
 > errors), replace the `type` filter with
 > `| filter execution_arn like /<execution-arn-tail>/`.
 
-### 7. Agent Runtime Alarms
+### 6. Agent Runtime Alarms
 
 28 CloudWatch alarms cover the 6 AgentCore agent runtimes + the skill runtime +
 6 orchestrator node Lambdas + the Step Functions state machine (errors and
@@ -465,11 +485,10 @@ with savings accumulated across multiple strategies.
 CloudWatch Domain Dashboard (30s refresh):
   https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-domain
 
-CloudWatch Platform Dashboard (AWS-resource infra health):
+CloudWatch Platform Dashboard (AWS-resource infra health + application-layer
+signal — circuit breaker, resilience, eval quality; merged from the former
+separate Application dashboard on 2026-08-12, PR #265):
   https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-platform
-
-CloudWatch Application Dashboard (circuit breaker, resilience, eval quality):
-  https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-application
 
 CloudWatch FinOps Dashboard (token usage, cost per negotiation):
   https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=dev-buyer-team-finops
