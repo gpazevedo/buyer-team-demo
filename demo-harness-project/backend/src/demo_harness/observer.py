@@ -199,6 +199,13 @@ SFN_GRAPH_STATES = [
 ]
 
 
+_DASHBOARD_NAMES = {
+    "platform": f"{ENV}-buyer-team-platform",
+    "finops": f"{ENV}-buyer-team-finops",
+    "business": f"{ENV}-buyer-team-domain",
+}
+
+
 def _dashboard_url(dashboard_name: str) -> str:
     """CloudWatch dashboard console URL for the current ENV/region."""
     return (
@@ -305,11 +312,7 @@ async def get_trace_urls(negotiation_id: str):
     urls: dict = {
         "sfn": None,
         "xray": None,
-        "dashboards": {
-            "platform": _dashboard_url(f"{ENV}-buyer-team-platform"),
-            "finops": _dashboard_url(f"{ENV}-buyer-team-finops"),
-            "business": _dashboard_url(f"{ENV}-buyer-team-domain"),
-        },
+        "dashboards": {k: _dashboard_url(v) for k, v in _DASHBOARD_NAMES.items()},
     }
 
     # SFN: execution name is deterministic (neg-{negotiation_id})
@@ -334,6 +337,207 @@ async def get_trace_urls(negotiation_id: str):
         logger.exception("trace resolution failed for %s", negotiation_id)
 
     return urls
+
+
+@router.get("/negotiations/{negotiation_id}/audit")
+def get_audit_trail(negotiation_id: str):
+    """Append-only decision trail for one negotiation.
+
+    One immutable row per LLM decision, tool call and orchestrator-node decision.
+    `source_layer` says which runtime produced it — `lambda_core` (an
+    orchestrator node Lambda) or `buyer_agent_core` (a Bedrock AgentCore agent).
+    With NAT down only `lambda_core` rows exist, since the agent tier never runs;
+    `agent_tier_reached` reports that so an empty agent half doesn't read as a
+    broken panel.
+    """
+    from boto3.dynamodb.conditions import Key
+    from test_tenant_app.clients.ddb import table, to_native
+
+    rows = to_native(
+        table("negotiation-events")
+        .query(KeyConditionExpression=Key("pk").eq(f"{TENANT_ID}#{negotiation_id}"))
+        .get("Items", [])
+    )
+
+    events = []
+    for r in rows:
+        detail = r.get("detail")
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except ValueError:
+                detail = {"raw": detail}
+        events.append(
+            {
+                "ts": r.get("ts"),
+                "event_id": r.get("event_id"),
+                "actor": r.get("actor"),
+                "event_type": r.get("event_type"),
+                "source_layer": r.get("source_layer"),
+                "detail": detail,
+            }
+        )
+
+    # sk is `{ts}#{event_id}`, so the Query already returns these chronologically.
+    return {
+        "negotiation_id": negotiation_id,
+        "count": len(events),
+        "agent_tier_reached": any(e["source_layer"] == "buyer_agent_core" for e in events),
+        "events": events,
+    }
+
+
+# ── Live CloudWatch signals ───────────────────────────────────────
+
+# Every procurement metric is emitted with a multi-key dimension set, and
+# CloudWatch only returns a series when *all* dimensions match. Querying with a
+# partial dimension list (e.g. tenant_id alone) returns zero datapoints with
+# StatusCode=Complete and no error — a silent empty strip. SEARCH() over the
+# full dimension schema is the only read path that works; the schemas below must
+# match what the emitters actually publish.
+_METRIC_SPECS: list[dict] = [
+    {
+        "key": "negotiations_started",
+        "label": "Negotiations Started",
+        "namespace": "procurement/business",
+        "dimensions": "kraljic_quadrant,strategy,tenant_id",
+        "metric": "negotiation.started",
+        "stat": "Sum",
+        "across": "SUM",
+        "reduce": "sum",
+        "unit": "count",
+        "dashboard": "business",
+    },
+    {
+        "key": "negotiations_completed",
+        "label": "Negotiations Completed",
+        "namespace": "procurement/business",
+        "dimensions": "status,strategy,tenant_id",
+        "metric": "negotiation.completed",
+        "stat": "Sum",
+        "across": "SUM",
+        "reduce": "sum",
+        "unit": "count",
+        "dashboard": "business",
+    },
+    {
+        "key": "cycle_time",
+        "label": "Cycle Time",
+        "namespace": "procurement/business",
+        "dimensions": "strategy,tenant_id",
+        "metric": "negotiation.cycle_time",
+        "stat": "Average",
+        "across": "AVG",
+        "reduce": "latest",
+        "unit": "s",
+        "dashboard": "business",
+    },
+    {
+        "key": "approval_wait_time",
+        "label": "Approval Wait",
+        "namespace": "procurement/business",
+        "dimensions": "tenant_id",
+        "metric": "approval.wait_time",
+        "stat": "Average",
+        "across": "AVG",
+        "reduce": "latest",
+        "unit": "s",
+        "dashboard": "business",
+    },
+    {
+        "key": "negotiation_cost",
+        "label": "Bedrock Cost",
+        "namespace": "procurement/cost",
+        "dimensions": "kraljic_quadrant,negotiation_id,strategy,tenant_id",
+        "metric": "negotiation.total_cost_usd",
+        "stat": "Sum",
+        "across": "SUM",
+        "reduce": "sum",
+        "unit": "usd",
+        "dashboard": "finops",
+    },
+    {
+        "key": "agent_success_rate",
+        "label": "Agent Success",
+        "namespace": "procurement/resilience",
+        "dimensions": "agent_name,tenant_id",
+        "metric": "agentcore.invocation_success",
+        "stat": "Average",
+        "across": "AVG",
+        "reduce": "latest",
+        "unit": "ratio",
+        "dashboard": "platform",
+    },
+]
+
+# A demo session's worth of history. Some metrics are very sparse —
+# negotiation.total_cost_usd is emitted once per negotiation, so a narrow window
+# drops it from the strip as soon as the narrator lingers on a completed run.
+METRICS_WINDOW_MINUTES = 60
+METRICS_PERIOD_SECONDS = 60
+
+
+def _search_expression(spec: dict, tenant_id: str) -> str:
+    """SEARCH over the metric's full dimension schema, scoped to one tenant, then
+    collapsed across series into a single line by SUM()/AVG()."""
+    return (
+        f"{spec['across']}(SEARCH('{{{spec['namespace']},{spec['dimensions']}}} "
+        f'MetricName="{spec["metric"]}" tenant_id="{tenant_id}"\', '
+        f"'{spec['stat']}', {METRICS_PERIOD_SECONDS}))"
+    )
+
+
+def _reduce_series(values: list[float], how: str) -> float | None:
+    """None (not 0) when the metric hasn't been published yet — a not-yet-emitted
+    metric must never render as a real zero on screen."""
+    if not values:
+        return None
+    return sum(values) if how == "sum" else values[0]
+
+
+@router.get("/metrics")
+def get_live_metrics():
+    """Live CloudWatch signals for this tenant, for in-page display.
+
+    Values are None until the metric is actually published (EMF surfaces in
+    ~30s), so a fresh demo opens with an empty strip and fills in as the
+    negotiation runs."""
+    import datetime
+
+    from demo_harness.health import _cloudwatch_client
+
+    end = datetime.datetime.now(datetime.UTC)
+    start = end - datetime.timedelta(minutes=METRICS_WINDOW_MINUTES)
+
+    queries = [
+        {
+            "Id": f"m{i}",
+            "Expression": _search_expression(spec, TENANT_ID),
+            "Period": METRICS_PERIOD_SECONDS,
+        }
+        for i, spec in enumerate(_METRIC_SPECS)
+    ]
+
+    try:
+        results = _cloudwatch_client.get_metric_data(
+            MetricDataQueries=queries, StartTime=start, EndTime=end, ScanBy="TimestampDescending"
+        )["MetricDataResults"]
+    except Exception:
+        logger.exception("CloudWatch metric read failed")
+        raise HTTPException(status_code=503, detail="CloudWatch unavailable")
+
+    by_id = {r["Id"]: r for r in results}
+    metrics = {}
+    for i, spec in enumerate(_METRIC_SPECS):
+        values = by_id.get(f"m{i}", {}).get("Values", [])
+        metrics[spec["key"]] = {
+            "label": spec["label"],
+            "value": _reduce_series(values, spec["reduce"]),
+            "unit": spec["unit"],
+            "namespace": spec["namespace"],
+            "dashboard_url": _dashboard_url(_DASHBOARD_NAMES[spec["dashboard"]]),
+        }
+    return {"window_minutes": METRICS_WINDOW_MINUTES, "metrics": metrics}
 
 
 # ── PR Generator (Seam S1) ────────────────────────────────────────

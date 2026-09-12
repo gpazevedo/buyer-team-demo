@@ -10,7 +10,7 @@ while you narrate what happens in the orchestrator and the observability layer.
 ## Prerequisites
 
 ```bash
-# From impl/
+# From demo/ — this repo has its own uv workspace; impl/ is a separate checkout
 uv sync
 
 # Seed Blue Jets tenant (idempotent — safe to re-run if already seeded)
@@ -46,14 +46,22 @@ https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashbo
 
 ## Quick-start demo (3 minutes)
 
-1. Open `http://localhost:5174` — the header shows a green "Buyer Team reachable" badge and a second pricing-mode badge: green "LLM agents reachable" when live Bedrock pricing is flowing, amber "Fallback pricing (VPC/NAT down)" when the resilience fallback is active, or gray "No recent bids" if nothing has priced yet. Hover it for the `pricing_mode_source`.
+1. Open `http://localhost:5174`. **Lead with the header — it establishes that this is
+   real AWS, not a local mock.** It carries an `AWS us-east-1 · dev · acct 234876310489`
+   badge, then one named dot per service the harness actually talks to — **AWS Lambda**,
+   **DynamoDB**, **Step Functions**, **Bedrock AgentCore** (hover any dot for the raw
+   check result) — plus the pricing-mode badge: green "LLM agents reachable" when live
+   Bedrock pricing is flowing, amber "Fallback pricing (VPC/NAT down)" when the
+   resilience fallback is active, gray "No recent bids" if nothing has priced yet.
 2. Pick **Strategic** (HPT blade set, $96k/unit), quantity 1, click **Submit PR**.
-3. You are auto-switched to the **Timeline** tab. A live **Step Functions** graph shows the 8-state orchestrator run: each state lights up green as it completes, the current one pulses amber. The progress bar below shows: Ingest → Strategy → Evaluate → Approval → Award → PO Issued.
-4. Watch offers arrive from TurbineTech OEM (the only STRATEGIC supplier). Each new offer pops in via SSE.
-5. The timeline pauses at **PENDING_APPROVAL** with a yellow "Human Approval Required" panel. Click **Approve**.
-6. The negotiation transitions through APPROVED → AWARDED → COMPLETED. A green "Purchase Order" section appears.
-7. Switch to the CloudWatch dashboard tab — widgets show data within 30 seconds (high-resolution 1-second metrics). The "Negotiations Started vs Completed" widget now shows 1 completed.
-8. Open X-Ray with the procurement filter to see the connected trace across all 6 nodes: `https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL`
+3. You are auto-switched to the **Timeline** tab. A live **Step Functions** graph shows the 8-state orchestrator run: each state lights up green as it completes, the current one pulses amber. **Each state names the AWS primitive that runs it** — `λ node1-ingest-validate`, `λ node2 → AgentCore`, `λ node6 · waitForTaskToken`, and `SFN Choice` / `SFN Succeed` for the two states that are pure Step Functions with no Lambda behind them.
+4. Below it, **Live AWS Signals** reads six metrics straight out of Amazon CloudWatch, each tile labelled with the namespace it came from (`procurement/business`, `procurement/cost`, `procurement/resilience`). **The strip starts blank (`—`) by design** and fills in as the run progresses — EMF metrics surface in ~30s. Watch "Negotiations Started" tick up without leaving the app.
+5. Watch offers arrive from TurbineTech OEM (the only STRATEGIC supplier). Each new offer pops in via SSE.
+6. The timeline pauses at **PENDING_APPROVAL** with a yellow "Human Approval Required" panel. Click **Approve**.
+7. The negotiation transitions through APPROVED → AWARDED → COMPLETED. A green "Purchase Order" section appears, and the **Bedrock Cost** tile registers the run's actual spend.
+8. Expand the **Decision Trail** panel — every LLM decision, tool call and orchestrator-node decision for this negotiation, appended immutably to DynamoDB. Each row is badged with the runtime that produced it: `λ Lambda` or `Bedrock AgentCore`.
+9. Switch to the CloudWatch dashboard tab — widgets show data within 30 seconds (high-resolution 1-second metrics). The "Negotiations Started vs Completed" widget now shows 1 completed.
+10. Open X-Ray with the procurement filter to see the connected trace across all 6 nodes: `https://us-east-1.console.aws.amazon.com/xray/home?region=us-east-1#/traces?filter=annotation.procurement.tenant_id%20IS%20NOT%20NULL`
 
 ---
 
@@ -84,9 +92,16 @@ Four Kraljic quadrants are available, each driving a different orchestrator path
 | Quadrant | Part | Strategy | What to watch |
 |----------|------|----------|---------------|
 | Non-Critical | Lavatory consumable kit ($180) | SPOT_BID | Auto-approves. Completes in ~30s. No approval panel appears. |
-| Leverage | Main wheel tire ($2,400) | COMPETITIVE_AUCTION | HITL only if awarded price >$5k (set qty ≥3). See competing bids from AeroStock, SkyParts, GlobalWheel. |
+| Leverage | Main wheel tire ($2,400) | COMPETITIVE_AUCTION | HITL only if the **awarded** price >$5k — use **qty=40**, not 3 (see note below). See competing bids from AeroStock, SkyParts, GlobalWheel. |
 | Bottleneck | VHF COMM transceiver ($11,800) | PARTNERSHIP_RISK | Always pauses for HITL approval. Block reason reads "quadrant_bottleneck". |
 | Strategic | HPT stage-1 blade set ($96,000) | PARTNERSHIP_VALUE | Always pauses for HITL. Highest value — best savings story. |
+
+> **The $5k gate is checked against the *awarded* price, not the estimated total.**
+> Real LLM-negotiated prices land 60–95% under the $2,400/unit estimate, so qty=3
+> (~$7.2k estimated) is awarded well under $5k and skips HITL entirely — as does qty=5.
+> Use **qty=40** (~$96k estimated) to leave enough margin to still clear $5k after a
+> steep negotiated discount. The $5k ceiling is the Blue Jets tenant override written by
+> `seed.py` (`auto_approve_below_usd`), below the shared `governance/default` $10k.
 
 **Flow per strategy:**
 
@@ -104,7 +119,7 @@ flowchart TD
     Auction -->|Yes: LEVERAGE| MultiRound["Multi-round auction<br>(suppliers revise bids)"]
     MultiRound --> Check5k{"Awarded<br>price > $5k?"}
     Check5k -->|"No (qty 1)"| AutoOK
-    Check5k -->|"Yes (qty ≥3)"| HITL["PENDING_APPROVAL<br>yellow panel"]
+    Check5k -->|"Yes (qty 40)"| HITL["PENDING_APPROVAL<br>yellow panel"]
     HITL --> Approve["APPROVED<br>(human or auto)"]
     HITL --> CycleBack["Cycle Back"]
     HITL --> Reject["Reject"]
@@ -157,16 +172,17 @@ second. No mock data — every update is the real orchestrator writing to `{env}
 
 **What you see, in order:**
 
-1. **Step Functions graph** — the live orchestrator execution, one chip per canonical state: `IngestValidate → KraljicClassify → RouteStrategy → StrategyExecute → BidEvaluation → ApprovalGate → AwardComms → Done`. Chips are gray (pending), green (succeeded), amber and pulsing (currently running), red (failed). `ApprovalGate` sits pulsing amber while the HITL pause is active. A "SFN Console ↗" link jumps to the real execution in the AWS console. (The graph polls the backend's `/sfn` endpoint every 5s; the internal `Check*`/`Terminated`/`Failed` choice plumbing is omitted since it never blocks or shows progress on the happy path.)
-2. **Progress bar** — light-blue filled segments advance: Ingest → Strategy → Evaluate → Approval → Award → PO Issued. The active segment pulses.
-3. **Quadrant + strategy badges** — e.g. `STRATEGIC` (red) + `PARTNERSHIP_VALUE`.
-4. **Invitations sent** — supplier names appear as they are invited to bid. Auto-priced strategies (SPOT_BID, COMPETITIVE_AUCTION) show synthetic invitations derived from bid data since the orchestrator bypasses the agent.
-5. **Auction Round Feedback** — for multi-round auction strategies, rank/feedback updates appear after each round.
-6. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
-7. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
-8. **Award** — green card with awarded supplier, total amount, and savings.
-9. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
-10. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
+1. **Step Functions graph** — the live orchestrator execution, one chip per canonical state: `IngestValidate → KraljicClassify → RouteStrategy → StrategyExecute → BidEvaluation → ApprovalGate → AwardComms → Done`. Chips are gray (pending), green (succeeded), amber and pulsing (currently running), red (failed). `ApprovalGate` sits pulsing amber while the HITL pause is active. A "SFN Console ↗" link jumps to the real execution in the AWS console. (The graph polls the backend's `/sfn` endpoint every 5s; the internal `Check*`/`Terminated`/`Failed` choice plumbing is omitted since it never blocks or shows progress on the happy path.) Each chip also names the AWS primitive that executes it — the six `node{N}` Lambdas, with `KraljicClassify`/`StrategyExecute` marked as the two that reach Bedrock AgentCore. `RouteStrategy` (Choice) and `Done` (Succeed) are labelled as pure Step Functions states: no Lambda runs either one.
+2. **Live AWS Signals** — six CloudWatch metrics for this tenant, read in-page via `GET /demo/metrics` and polled every 5s: negotiations started/completed, cycle time, approval wait, Bedrock cost, and agent invocation success. Each tile carries the CloudWatch namespace it came from and links to the dashboard that owns it. Tiles read `—` until the metric is actually published (never `0`, which would misread as "nothing happened"), so the strip is blank at the start of a session and fills in as the run progresses. The window is the last 60 minutes — wide enough that `negotiation.total_cost_usd`, which is emitted only once per negotiation, stays on screen while you narrate the completed run.
+3. **Progress bar** — light-blue filled segments advance: Ingest → Strategy → Evaluate → Approval → Award → PO Issued. The active segment pulses.
+4. **Quadrant + strategy badges** — e.g. `STRATEGIC` (red) + `PARTNERSHIP_VALUE`.
+5. **Invitations sent** — supplier names appear as they are invited to bid. Auto-priced strategies (SPOT_BID, COMPETITIVE_AUCTION) show synthetic invitations derived from bid data since the orchestrator bypasses the agent.
+6. **Auction Round Feedback** — for multi-round auction strategies, rank/feedback updates appear after each round.
+7. **Supplier Offers** — cards appear as bids land, showing supplier name, amount, delivery days, evaluation rank. Resilience-fallback bids are tagged `source: <strategy>_fallback_stub`.
+8. **Human Approval Required** (for BOTTLENECK/STRATEGIC / high-value LEVERAGE) — yellow panel with Approve / Cycle Back / Reject buttons. Block reason shown above.
+9. **Award** — green card with awarded supplier, total amount, and savings.
+10. **Purchase Order** — dark-green section confirming PO issued with PO ID and total value.
+11. **Event log** — expandable detail section at the bottom showing every SSE event as JSON.
 
 **The status flow** (normalized for the UI — raw orchestrator statuses are mapped by `dynamo_client._NEG_STATUS`):
 
@@ -237,11 +253,27 @@ which are always UTC, against what you saw on screen.
 
 ## AWS Observability Walkthrough
 
-Every dashboard below is reachable with one click: the Timeline header shows
-**Platform / FinOps / Business** buttons (each linking to its CloudWatch dashboard)
-next to the **SFN Trace ↗** and **X-Ray Trace ↗** links and the estimated cost. The
-buttons render as plain labels until the backend resolves their URLs (~a second
-after the negotiation snapshot loads).
+**You do not have to leave the app to show observability.** The Timeline carries two
+in-page panels that read live AWS data directly:
+
+- **Live AWS Signals** — six CloudWatch metrics for this tenant (`GET /demo/metrics`),
+  each tile naming its source namespace and linking to the dashboard that owns it.
+- **Decision Trail** — the append-only `{env}-negotiation-events` DynamoDB trail for
+  this negotiation (`GET /demo/negotiations/{id}/audit`), one immutable row per LLM
+  decision, tool call and orchestrator-node decision, each badged `λ Lambda` or
+  `Bedrock AgentCore` by the runtime that produced it.
+
+The console dashboards below are the deeper dive. Every one is reachable with one
+click: the Timeline header shows **Platform / FinOps / Business** buttons (each linking
+to its CloudWatch dashboard) next to the **SFN Trace ↗** and **X-Ray Trace ↗** links and
+the estimated cost. The buttons render as plain labels until the backend resolves their
+URLs (~a second after the negotiation snapshot loads).
+
+> **Why the metric tiles read `—` rather than a number.** They are scoped to the Blue
+> Jets tenant, so they show only what *this* demo produced. A fresh session opens with
+> every tile blank and fills in as the run progresses — that is the point, since it makes
+> the causality visible. A tile never shows `0` for a metric that simply hasn't been
+> published yet, because a real zero would misread as "nothing happened".
 
 ### 1. CloudWatch Domain Dashboard
 
@@ -450,8 +482,9 @@ negotiation's timeline updates independently.
    auto-approved, PO issued in ~30 seconds. No human needed."
 2. **LEVERAGE (qty=1)** — "Multiple suppliers compete. No HITL needed because the
    awarded price stays under the $5k gate."
-3. **LEVERAGE (qty=3, ~$7.2k)** — "Same item, higher quantity — now over the $5k
-   threshold. The governance gate pauses for approval."
+3. **LEVERAGE (qty=40, ~$96k est.)** — "Same item, much higher quantity — the awarded
+   price now clears the $5k threshold even after the negotiated discount, so the
+   governance gate pauses for approval."
 4. **BOTTLENECK** — "A sole-source avionics part. Partnership strategy, always
    requires human approval regardless of price."
 5. **STRATEGIC** — "The crown jewel: engine LLP, $96k. Two agents negotiate with
@@ -478,6 +511,9 @@ with savings accumulated across multiple strategies.
 | Progress bar goes all-gray with no approval panel, negotiation stuck at "CANCELLED" | Zero suppliers returned a qualifying bid (rare — would need every invited supplier to fail/decline) | Expected terminal state, not a bug — `CANCELLED` isn't in the ProgressBar `statusOrder` yet, so the bar just doesn't highlight a segment. Reset and resubmit. |
 | Page lands on "New PR" tab after HITL approval | `window.location.reload()` reset all React state to defaults | Fixed — active tab and negotiation ID saved to `sessionStorage` before reload and restored on init |
 | Dashboard widgets show "No data" | No negotiations completed today, or the IAM role for the emitting component doesn't include the `procurement/business` namespace in its `cloudwatch:PutMetricData` condition | Submit a PR and let it finish — data appears within 30 seconds. If it doesn't, the IAM policy for that Lambda's role needs the namespace added (see `infra/modules/step-functions/main.tf` step-invoker policy or `infra/agent_runtimes.tf` agent-runtime policy) |
+| "Live AWS Signals" tiles all show `—` | Expected at the start of a session — the tiles are scoped to the Blue Jets tenant and no negotiation has emitted metrics in the last 60 min | Submit a PR and let it run; EMF metrics surface in ~30s. If they stay blank *after* a completed run, check `curl -s localhost:8000/demo/metrics` — a 503 means CloudWatch is unreachable, all-null values mean the emitters published nothing |
+| "Decision Trail" shows 0 events | The negotiation predates the audit trail (shipped 2026-08-30), or it is still in its first seconds | Only negotiations started after 2026-08-30 have rows. Submit a fresh PR rather than opening an old one from the Requisitions tab |
+| Decision Trail shows only `λ Lambda` rows, no `Bedrock AgentCore` | VPC/NAT is down, so the agent tier never ran — the orchestrator fell back to stub pricing | Expected, not a bug. The panel says so inline. Restore the VPC for agent rows |
 
 ## Appendix: Console URLs (dev, us-east-1)
 

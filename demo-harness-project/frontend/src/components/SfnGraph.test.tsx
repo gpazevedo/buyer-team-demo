@@ -67,6 +67,33 @@ describe("SfnGraph", () => {
     }
   });
 
+  it("names the AWS primitive behind each state", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(graphResponse) });
+
+    render(<SfnGraph negotiationId="neg-1" />);
+
+    expect(await screen.findByText("λ node1-ingest-validate")).toBeInTheDocument();
+    expect(screen.getByText("λ node5-bid-evaluation")).toBeInTheDocument();
+    expect(screen.getByText("λ node6 · waitForTaskToken")).toBeInTheDocument();
+    // The two agent-invoking nodes are the only ones that reach Bedrock.
+    expect(screen.getAllByText("λ node2 → AgentCore")).toHaveLength(1);
+    expect(screen.getAllByText("λ node3 → AgentCore")).toHaveLength(1);
+  });
+
+  it("does not label the pure Step Functions states as Lambdas", async () => {
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(graphResponse) });
+
+    render(<SfnGraph negotiationId="neg-1" />);
+
+    // RouteStrategy is a Choice state and Done is a Succeed state — no Lambda
+    // runs either one, so neither may carry a λ annotation.
+    expect(await screen.findByText("SFN Choice")).toBeInTheDocument();
+    expect(screen.getByText("SFN Succeed")).toBeInTheDocument();
+    for (const name of ["RouteStrategy", "Done"]) {
+      expect(screen.getByText(name).textContent).not.toContain("λ");
+    }
+  });
+
   it("shows a waiting placeholder until the execution exists", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 404 });
 

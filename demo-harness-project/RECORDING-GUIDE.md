@@ -122,6 +122,24 @@ for i in $(seq 1 30); do
 done
 ```
 
+**Capture the AWS-explicit panels before approving.** The Timeline now carries three
+things worth landing on in the video, all of which read live AWS data in-page:
+
+1. The **header badge strip** — `AWS us-east-1 · dev · acct …` plus named dots for AWS
+   Lambda, DynamoDB, Step Functions and Bedrock AgentCore. Shoot this at the top of the
+   run; it's what establishes the demo isn't a local mock.
+2. The **Step Functions graph**, where each chip now names the primitive that runs it
+   (`λ node2 → AgentCore`, `λ node6 · waitForTaskToken`, `SFN Choice`).
+3. **Live AWS Signals** — the CloudWatch tile strip. It is blank at the start of a
+   session and fills in during the run, so let the recording sit on it for a beat after
+   the PR is submitted; "Negotiations Started" going from `—` to `1` on camera is the
+   whole point of the panel.
+
+```bash
+agent-browser scroll down 400
+agent-browser wait 3000        # let a metric poll land while the camera is on the strip
+```
+
 When `PENDING_APPROVAL`, re-snapshot (refs from before the SSE-driven
 re-render are stale) and click Approve:
 
@@ -147,7 +165,7 @@ four negotiations accumulated together at the end (see step 5).
 | Quadrant | Quantity | Why |
 |---|---|---|
 | NON_CRITICAL | 1 (default) | Auto-approves regardless; nothing to tune. |
-| LEVERAGE | **40**, not 1 | The radio label says "price gate at $10k," but that gate is checked against the *awarded* (negotiated) price, not the estimated total. Real LLM-negotiated prices land 60–95% under the $2,400/unit estimate, so qty=5 (~$12k estimated) awarded at ~$4.7k and skipped HITL entirely. qty=40 (~$96k estimated) leaves enough margin to still clear $10k after a steep negotiated discount. |
+| LEVERAGE | **40**, not 1 | The gate for this tenant is **$5k** (`seed.py`'s Blue Jets `auto_approve_below_usd` override, below the shared `governance/default` $10k), and it is checked against the *awarded* (negotiated) price, not the estimated total. Real LLM-negotiated prices land 60–95% under the $2,400/unit estimate, so qty=5 (~$12k estimated) awarded at ~$4.7k and skipped HITL entirely. qty=40 (~$96k estimated) leaves enough margin to still clear $5k after a steep negotiated discount. |
 | BOTTLENECK | 1 | Always HITL regardless of price. |
 | STRATEGIC | 1 | Always HITL; $96k/unit is already the richest negotiation. |
 

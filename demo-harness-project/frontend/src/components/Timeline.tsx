@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import OfferCard from "./OfferCard";
 import ApprovalControls from "./ApprovalControls";
+import AuditTrail from "./AuditTrail";
+import AwsSignals from "./AwsSignals";
 import SfnGraph from "./SfnGraph";
 
 type NegotiationState = {
@@ -257,6 +259,12 @@ export default function Timeline({ negotiationId, initialQuadrant }: { negotiati
 
       {/* Step Functions execution graph */}
       <SfnGraph negotiationId={negotiationId} />
+
+      {/* Live CloudWatch metrics for this tenant */}
+      <AwsSignals negotiationId={negotiationId} />
+
+      {/* Append-only per-decision audit trail */}
+      <AuditTrail negotiationId={negotiationId} />
 
       {/* Progress bar */}
       {state && (
