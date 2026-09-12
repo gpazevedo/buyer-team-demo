@@ -2,7 +2,7 @@ import { useActionState, useEffect, useState } from "react";
 
 const QUADRANTS = [
   { value: "NON_CRITICAL", label: "Non-Critical", desc: "SPOT_BID — Auto-approve", color: "green" },
-  { value: "LEVERAGE", label: "Leverage", desc: "COMPETITIVE_AUCTION — Price gate at $10k", color: "blue" },
+  { value: "LEVERAGE", label: "Leverage", desc: "COMPETITIVE_AUCTION — Price gate at $5k", color: "blue" },
   { value: "BOTTLENECK", label: "Bottleneck", desc: "PARTNERSHIP_RISK — Always HITL", color: "amber" },
   { value: "STRATEGIC", label: "Strategic", desc: "PARTNERSHIP_VALUE — Always HITL", color: "red" },
 ];

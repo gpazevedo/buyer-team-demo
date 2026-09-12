@@ -31,7 +31,14 @@ describe("BuyerTeamStatus", () => {
       "fetch",
       mockHealth({
         healthy: true,
-        checks: { approval_gate_lambda: "ok", step_functions: "ok" },
+        checks: {
+          approval_gate_lambda: "ok",
+          master_store_table: "ok",
+          requisitions_table: "ok",
+          step_functions: "ok",
+          agentcore_runtimes: "ok",
+        },
+        identity: { account: "234876310489", region: "us-east-1", env: "dev" },
         pricing_mode: "live",
         pricing_mode_source: "spot_bidding_agent",
       })
@@ -41,10 +48,63 @@ describe("BuyerTeamStatus", () => {
 
     expect(await screen.findByText("Buyer Team reachable")).toBeInTheDocument();
     expect(screen.getByText("LLM agents reachable")).toBeInTheDocument();
-    expect(screen.getByText("Step Functions reachable")).toBeInTheDocument();
+    expect(screen.getByText("Step Functions")).toBeInTheDocument();
   });
 
-  it("shows Step Functions unreachable when its check fails", async () => {
+  it("names each AWS service it depends on", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockHealth({
+        healthy: true,
+        checks: {
+          approval_gate_lambda: "ok",
+          master_store_table: "ok",
+          requisitions_table: "ok",
+          step_functions: "ok",
+          agentcore_runtimes: "ok",
+        },
+      })
+    );
+
+    render(<BuyerTeamStatus />);
+
+    expect(await screen.findByText("AWS Lambda")).toBeInTheDocument();
+    expect(screen.getByText("DynamoDB")).toBeInTheDocument();
+    expect(screen.getByText("Step Functions")).toBeInTheDocument();
+    expect(screen.getByText("Bedrock AgentCore")).toBeInTheDocument();
+  });
+
+  it("shows the AWS account, region and env so the substrate is unambiguous", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockHealth({
+        healthy: true,
+        checks: { step_functions: "ok" },
+        identity: { account: "234876310489", region: "us-east-1", env: "dev" },
+      })
+    );
+
+    render(<BuyerTeamStatus />);
+
+    expect(
+      await screen.findByText("AWS us-east-1 · dev · acct 234876310489")
+    ).toBeInTheDocument();
+  });
+
+  it("omits a service with no reported check rather than showing it as broken", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockHealth({ healthy: true, checks: { step_functions: "ok" } })
+    );
+
+    render(<BuyerTeamStatus />);
+
+    expect(await screen.findByText("Step Functions")).toBeInTheDocument();
+    expect(screen.queryByText("Bedrock AgentCore")).not.toBeInTheDocument();
+    expect(screen.queryByText("AWS Lambda")).not.toBeInTheDocument();
+  });
+
+  it("marks a service red and surfaces the error when its check fails", async () => {
     vi.stubGlobal(
       "fetch",
       mockHealth({
@@ -55,7 +115,9 @@ describe("BuyerTeamStatus", () => {
 
     render(<BuyerTeamStatus />);
 
-    expect(await screen.findByText("Step Functions unreachable")).toBeInTheDocument();
+    const badge = await screen.findByText("Step Functions");
+    expect(badge.getAttribute("title")).toContain("state machine not found");
+    expect(badge.querySelector(".bg-red-500")).not.toBeNull();
   });
 
   it("shows unreachable when the health check reports unhealthy", async () => {
